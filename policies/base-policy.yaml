@@ -37,9 +37,10 @@ landlock:
   compatibility: best_effort    # fall back gracefully on older kernels
 
 # --- Process policy (locked at sandbox creation) ---
-process:
-  run_as_user: sandbox
-  run_as_group: sandbox
+# NOTE: Do NOT set run_as_user/run_as_group here — the openclaw community
+# image runs as 'node'. Overriding it breaks the supervisor connection.
+# If you use a custom image, set the user in the Dockerfile instead.
+process: {}
 
 # --- Network policies (hot-reloadable at runtime) ---
 # Only LLM API endpoints are allowed. All other outbound connections are denied.
