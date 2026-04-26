@@ -71,12 +71,6 @@ update_openclaw() {
   log "Rebuilding openclaw:local image..."
   docker build -t openclaw:local _openclaw-src
 
-  # Restart if running
-  if docker compose ps --services --status running 2>/dev/null | grep -q "openclaw-gateway"; then
-    log "Restarting Docker Compose stack..."
-    docker compose up -d openclaw-gateway
-  fi
-
   if command -v openshell >/dev/null 2>&1 && \
      openshell sandbox list 2>/dev/null | grep -q "^${SANDBOX_NAME}"; then
     log "Note: OpenShell sandbox is running. Recreate it to pick up the new image:"

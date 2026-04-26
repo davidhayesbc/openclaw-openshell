@@ -105,11 +105,11 @@ All policy changes are logged. To review:
 openshell logs openclaw --tail
 ```
 
-### Docker Compose Network (Fallback)
+### Host Network Boundary
 
-The `docker-compose.yml` uses a named internal network (`openclaw-net`). The container has outbound internet access but is isolated from other Docker containers.
+The OpenShell sandbox is the primary runtime boundary. Keep host firewall rules default-deny inbound, and allow only the minimum ports required for your administration path.
 
-**If you need to restrict outbound on the Compose path**, consider adding an egress proxy (e.g., [squid](http://www.squid-cache.org/) or [tinyproxy](https://tinyproxy.github.io/)) as a Docker service with an allow-only config.
+If you need additional outbound control beyond OpenShell policy, place the host behind an egress proxy or network firewall allowlist.
 
 ---
 
@@ -141,26 +141,7 @@ openclaw.yourdomain.com {
 }
 ```
 
-Add to `docker-compose.yml`:
-```yaml
-  caddy:
-    image: caddy:2-alpine
-    ports:
-      - "443:443"
-      - "80:80"
-    volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-    networks:
-      - openclaw-net
-```
-
-Change the gateway port binding to internal-only:
-```yaml
-# Remove the host port binding for the gateway (Caddy proxies internally)
-# ports:
-#   - "127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}:18789"
-```
+Run Caddy as a host service and proxy to the OpenShell-forwarded local port (`127.0.0.1:18789`). Keep the gateway bound to loopback only.
 
 **Option C — SSH tunnel**
 ```bash
@@ -216,7 +197,7 @@ The hardened `openclaw.json` disables shell execution and filesystem access by d
 
 1. **Scope it to one agent** — Don't enable globally
 2. **Use `ask: "always"`** — The agent asks before running any command
-3. **Enable OpenShell sandbox mode** — Uncomment the Docker socket mount in `docker-compose.yml` and enable agent sandboxing in `openclaw.json`
+3. **Run only in OpenShell sandbox mode** — Keep policies minimal while temporary elevation is enabled
 4. **Revert when done** — Re-commit the restricted config
 
 ```json5
@@ -241,12 +222,11 @@ tools: {
 
 ### Retention
 
-Docker Compose logs are rotated: 10MB × 5 files = 50MB max per service.
+Configure host log retention to your compliance requirements and keep OpenShell policy/audit logs for incident investigation.
 
 To view logs:
 ```bash
-docker compose logs -f --tail=100 openclaw-gateway    # Docker path
-openshell logs openclaw --tail                        # OpenShell path
+openshell logs openclaw --tail
 ```
 
 ---
@@ -259,8 +239,6 @@ If you suspect a compromise:
 
 ```bash
 bash scripts/stop.sh         # Kill the sandbox immediately
-# OR
-docker compose down          # If using Compose path
 ```
 
 ### Token rotation
@@ -271,17 +249,16 @@ bash scripts/rotate-token.sh
 
 ### Assess damage
 
-1. Review logs: `docker compose logs openclaw-gateway > /tmp/incident-logs.txt`
-2. Review OpenShell policy decisions: `openshell logs openclaw`
-3. Check `~/.openclaw/` for unexpected files
-4. Review workspace: `ls -la ~/.openclaw/workspace/`
-5. Check for outbound connections that may have exfiltrated data
+1. Review OpenShell runtime and policy logs: `openshell logs openclaw --tail`
+2. Check `~/.openclaw/` for unexpected files
+3. Review workspace: `ls -la ~/.openclaw/workspace/`
+4. Check for outbound connections that may have exfiltrated data
 
 ### Rebuild from clean state
 
 ```bash
 # Remove all OpenClaw data (this deletes memory and credentials)
-docker compose down -v
+bash scripts/stop.sh
 rm -rf ~/.openclaw
 
 # Re-run setup from known-good git state

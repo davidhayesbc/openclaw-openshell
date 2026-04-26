@@ -48,9 +48,9 @@ if command -v openshell >/dev/null 2>&1 && \
   log "Restarting OpenShell sandbox..."
   scripts/stop.sh
   scripts/start.sh
-elif docker compose ps --services --status running 2>/dev/null | grep -q "openclaw-gateway"; then
-  log "Restarting Docker Compose gateway..."
-  docker compose restart openclaw-gateway
+else
+  log "OpenShell sandbox is not currently running."
+  log "Start it with scripts/start.sh to apply the new token."
 fi
 
 log "Token rotation complete."

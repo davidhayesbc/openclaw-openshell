@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# audit.sh — Security audit: OpenClaw + OpenShell + Docker
+# audit.sh — Security audit: OpenClaw + OpenShell
 # =============================================================================
 # Runs all available security checks and summarises findings.
 #
@@ -58,11 +58,6 @@ if command -v openshell >/dev/null 2>&1 && \
   echo "Running inside OpenShell sandbox '${SANDBOX_NAME}'..."
   openshell sandbox connect "${SANDBOX_NAME}" -- \
     openclaw security audit ${DEPTH/--deep/--deep} 2>/dev/null || true
-elif docker compose ps --services --status running 2>/dev/null | grep -q "openclaw-gateway"; then
-  # Docker Compose path
-  docker compose exec openclaw-gateway \
-    node dist/index.js security audit ${DEPTH/--deep/--deep} \
-    --token "$OPENCLAW_GATEWAY_TOKEN" 2>/dev/null || true
 else
   echo "OpenClaw not running — start it first for a live audit."
   echo "Static config check: reviewing config/openclaw.json..."
@@ -86,32 +81,32 @@ else
 fi
 echo ""
 
-# --- 5. Docker security checks ---
-echo "--- [5/6] Docker container checks ---"
-if docker compose ps --services --status running 2>/dev/null | grep -q "openclaw-gateway"; then
-  echo "Container: openclaw-gateway"
+# --- 5. Runtime container checks ---
+echo "--- [5/6] Runtime container checks ---"
+if command -v openshell >/dev/null 2>&1 && \
+   openshell sandbox list 2>/dev/null | grep -q "^${SANDBOX_NAME}"; then
+  echo "Sandbox: ${SANDBOX_NAME}"
 
   # Check if running as root
-  CONTAINER_USER=$(docker compose exec openclaw-gateway id -un 2>/dev/null || echo "unknown")
+  CONTAINER_USER=$(openshell sandbox connect "${SANDBOX_NAME}" -- id -un 2>/dev/null || echo "unknown")
   if [[ "$CONTAINER_USER" == "root" ]]; then
-    echo "  WARNING: Running as root — check 'user:' in docker-compose.yml"
+    echo "  WARNING: Sandbox process is running as root"
   else
     echo "  OK: Running as $CONTAINER_USER (non-root)"
   fi
 
-  # Check port binding
-  PORTS=$(docker compose port openclaw-gateway 18789 2>/dev/null || echo "")
-  if echo "$PORTS" | grep -qE "^0\.0\.0\.0:"; then
-    echo "  WARNING: Port 18789 is bound to 0.0.0.0 — exposed to all interfaces"
-    echo "    Change OPENCLAW_GATEWAY_BIND to 'loopback' in .env"
-  elif echo "$PORTS" | grep -qE "^127\.0\.0\.1:"; then
-    echo "  OK: Port 18789 is bound to loopback only"
-  fi
+  # Check capabilities of PID 1 inside the sandbox
+  echo "  Capabilities: $(openshell sandbox connect "${SANDBOX_NAME}" -- sh -lc "grep CapEff /proc/1/status" 2>/dev/null || echo 'unknown')"
 
-  # Check capabilities
-  echo "  Capabilities: $(docker compose exec openclaw-gateway cat /proc/1/status 2>/dev/null | grep CapEff || echo 'unknown')"
+  # Verify host-side port exposure remains loopback-only
+  if docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE '0\.0\.0\.0:18789|\[::\]:18789'; then
+    echo "  WARNING: Port 18789 appears exposed on all interfaces"
+    echo "    Verify OpenShell forwarding and host firewall settings"
+  else
+    echo "  OK: Port 18789 is not exposed to all interfaces"
+  fi
 else
-  echo "Docker Compose stack not running — skipping container checks."
+  echo "OpenShell sandbox not running — skipping runtime container checks."
 fi
 echo ""
 

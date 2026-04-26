@@ -31,28 +31,28 @@ GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 
 case "$MODE" in
   --tui|-t)
-    if command -v openshell >/dev/null 2>&1; then
-      echo "[monitor] Launching OpenShell TUI (press q to quit)..."
-      echo "  Tab = switch panels  |  j/k = navigate  |  Enter = select  |  : = command"
-      echo ""
-      openshell term
-    else
-      echo "[monitor] OpenShell not installed — falling back to docker stats"
-      docker stats
+    if ! command -v openshell >/dev/null 2>&1; then
+      echo "[monitor] ERROR: OpenShell not installed. Run scripts/install.sh first."
+      exit 1
     fi
+    echo "[monitor] Launching OpenShell TUI (press q to quit)..."
+    echo "  Tab = switch panels  |  j/k = navigate  |  Enter = select  |  : = command"
+    echo ""
+    openshell term
     ;;
 
   --logs|-l)
     echo "[monitor] Tailing OpenClaw gateway logs (Ctrl+C to stop)..."
     echo ""
-    if command -v openshell >/dev/null 2>&1 && \
-       openshell sandbox list 2>/dev/null | grep -q "^${SANDBOX_NAME}"; then
-      # OpenShell path
-      openshell logs "${SANDBOX_NAME}" --tail
-    else
-      # Docker Compose path
-      docker compose logs -f --tail=50 openclaw-gateway
+    if ! command -v openshell >/dev/null 2>&1; then
+      echo "[monitor] ERROR: OpenShell not installed. Run scripts/install.sh first."
+      exit 1
     fi
+    if ! openshell sandbox list 2>/dev/null | grep -q "^${SANDBOX_NAME}"; then
+      echo "[monitor] ERROR: Sandbox '${SANDBOX_NAME}' is not running. Start it with scripts/start.sh."
+      exit 1
+    fi
+    openshell logs "${SANDBOX_NAME}" --tail
     ;;
 
   --stats|-s)

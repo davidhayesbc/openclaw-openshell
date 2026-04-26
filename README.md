@@ -59,11 +59,7 @@ bash scripts/validate-env.sh
 ### 3. Start
 
 ```bash
-# Recommended: OpenShell sandboxed path
 bash scripts/start.sh
-
-# Fallback: Docker Compose only (no OpenShell runtime sandbox)
-bash scripts/start.sh --compose
 ```
 
 ### 4. Open Control UI
@@ -97,15 +93,6 @@ bash scripts/audit.sh --deep
 | **Filesystem policy** | Restricts reads/writes to workspace only | ❌ Locked at creation |
 | **Process policy** | Blocks privilege escalation, restricts syscalls | ❌ Locked at creation |
 | **Inference router** | Can route LLM calls to controlled backends | ✅ Hot-reload |
-
-### What Docker Compose Provides (fallback path)
-
-- Port binding to `127.0.0.1` only (not exposed to network)
-- All Linux capabilities dropped (`cap_drop: ALL`)
-- `no-new-privileges` enforced
-- PID limits and CPU/memory caps
-- Log rotation (10MB × 5 files)
-- Isolated Docker network
 
 ### What OpenClaw Config Provides
 
@@ -157,7 +144,7 @@ git checkout <sha> -- policies/base-policy.yaml
 # Apply the restored config
 cp config/openclaw.json ~/.openclaw/openclaw.json
 openshell policy set openclaw --policy policies/base-policy.yaml --wait
-docker compose restart openclaw-gateway  # if using compose path
+scripts/stop.sh && scripts/start.sh
 ```
 
 ---
@@ -170,7 +157,7 @@ docker compose restart openclaw-gateway  # if using compose path
 ├── .gitignore            # Ignores .env, credentials, workspace data
 ├── .gitleaks.toml        # Secret scanning configuration
 ├── .pre-commit-config.yaml  # Git pre-commit hooks (gitleaks)
-├── docker-compose.yml    # Hardened OpenClaw Docker Compose
+├── docker-compose.yml    # Optional local compose resources (not used by scripts)
 ├── policies/
 │   ├── base-policy.yaml     # Minimal OpenShell network policy
 │   ├── extended-policy.yaml # Extended access for dev tasks
@@ -180,7 +167,7 @@ docker compose restart openclaw-gateway  # if using compose path
 │   └── README.md
 ├── scripts/
 │   ├── install.sh           # One-time setup
-│   ├── start.sh             # Start (OpenShell or Compose)
+│   ├── start.sh             # Start OpenShell sandbox
 │   ├── stop.sh              # Stop
 │   ├── monitor.sh           # Monitoring dashboard
 │   ├── audit.sh             # Security audit
@@ -212,7 +199,6 @@ bash scripts/rotate-token.sh    # Generate new gateway token + restart
 
 ```bash
 bash scripts/stop.sh            # Stop OpenShell sandbox
-bash scripts/stop.sh --compose  # Stop Docker Compose stack
 ```
 
 ---

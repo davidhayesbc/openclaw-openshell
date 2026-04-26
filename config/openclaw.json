@@ -12,9 +12,8 @@
 //   DISCORD_BOT_TOKEN         — Discord bot token (if used)
 //
 // After editing this file, restart the gateway:
-//   docker compose restart openclaw-gateway
-// Or in OpenShell:
-//   openshell sandbox connect openclaw  (then restart the daemon inside)
+//   scripts/stop.sh
+//   scripts/start.sh
 // =============================================================================
 {
   gateway: {

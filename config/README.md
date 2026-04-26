@@ -18,10 +18,9 @@ OpenClaw reads `~/.openclaw/openclaw.json` (inside the container: `/home/node/.o
 # Copy config to the openclaw config directory
 cp config/openclaw.json ${OPENCLAW_CONFIG_DIR:-~/.openclaw}/openclaw.json
 
-# Restart the gateway
-docker compose restart openclaw-gateway
-# OR (OpenShell path):
-openshell sandbox connect openclaw   # then restart daemon inside
+# Restart the OpenShell sandbox to pick up changes
+scripts/stop.sh
+scripts/start.sh
 ```
 
 Or use `scripts/start.sh` which does this automatically.
