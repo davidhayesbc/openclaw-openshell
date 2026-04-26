@@ -38,144 +38,115 @@ landlock:
 process: {}  # do not override — openclaw image uses 'node' user
 
 network_policies:
-  terms: &network_terms
-    # --- LLM APIs ---
-    - name: anthropic-api-write
-      endpoints:
-        - host: api.anthropic.com
-          port: 443
-          protocol: rest
-          enforcement: enforce
-          access: read-write
-      binaries:
-        - { path: /usr/local/bin/node }
-        - { path: /usr/bin/node }
+  anthropic_api_write:
+    name: anthropic-api-write
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - path: /usr/local/bin/node
+      - path: /usr/bin/node
 
-    - name: openai-api-write
-      endpoints:
-        - host: api.openai.com
-          port: 443
-          protocol: rest
-          enforcement: enforce
-          access: read-write
-      binaries:
-        - { path: /usr/local/bin/node }
-        - { path: /usr/bin/node }
+  openai_api_write:
+    name: openai-api-write
+    endpoints:
+      - host: api.openai.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - path: /usr/local/bin/node
+      - path: /usr/bin/node
 
-    - name: openrouter-api-write
-      endpoints:
-        - host: openrouter.ai
-          port: 443
-          protocol: rest
-          enforcement: enforce
-          access: read-write
-      binaries:
-        - { path: /usr/local/bin/node }
-        - { path: /usr/bin/node }
+  openrouter_api_write:
+    name: openrouter-api-write
+    endpoints:
+      - host: openrouter.ai
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - path: /usr/local/bin/node
+      - path: /usr/bin/node
 
-    - name: ollama-local-write
-      endpoints:
-        - host: 127.0.0.1
-          port: 11434
-          protocol: rest
-          enforcement: enforce
-          access: read-write
-        - host: localhost
-          port: 11434
-          protocol: rest
-          enforcement: enforce
-          access: read-write
-      binaries:
-        - { path: /usr/local/bin/node }
-        - { path: /usr/bin/node }
+  ollama_local_write:
+    name: ollama-local-write
+    endpoints:
+      - host: 127.0.0.1
+        port: 11434
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: localhost
+        port: 11434
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - path: /usr/local/bin/node
+      - path: /usr/bin/node
 
-    - name: ollama-cloud-write
-      endpoints:
-        - host: ollama.com
-          port: 443
-          protocol: rest
-          enforcement: enforce
-          access: read-write
-      binaries:
-        - { path: /usr/local/bin/node }
-        - { path: /usr/bin/node }
+  ollama_cloud_write:
+    name: ollama-cloud-write
+    endpoints:
+      - host: ollama.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - path: /usr/local/bin/node
+      - path: /usr/bin/node
 
-    # --- GitHub (read-only) ---
-    - name: github-api-read
-      endpoints:
-        - host: api.github.com
-          port: 443
-          protocol: rest
-          enforcement: enforce
-          access: read-only        # GET only — no issue creation or pushes
-      binaries:
-        - { path: /usr/bin/curl }
-        - { path: /usr/local/bin/node }
-        - { path: /usr/bin/git }
+  github_api_read:
+    name: github-api-read
+    endpoints:
+      - host: api.github.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+    binaries:
+      - path: /usr/bin/curl
+      - path: /usr/local/bin/node
+      - path: /usr/bin/git
 
-    - name: github-raw-read
-      endpoints:
-        - host: raw.githubusercontent.com
-          port: 443
-          protocol: rest
-          enforcement: enforce
-          access: read-only
-      binaries:
-        - { path: /usr/bin/curl }
+  github_raw_read:
+    name: github-raw-read
+    endpoints:
+      - host: raw.githubusercontent.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+    binaries:
+      - path: /usr/bin/curl
 
-    # --- npm registry (read-only, for installing packages) ---
-    - name: npm-registry-read
-      endpoints:
-        - host: registry.npmjs.org
-          port: 443
-          protocol: rest
-          enforcement: enforce
-          access: read-only
-      binaries:
-        - { path: /usr/bin/npm }
-        - { path: /usr/local/bin/npm }
+  npm_registry_read:
+    name: npm-registry-read
+    endpoints:
+      - host: registry.npmjs.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+    binaries:
+      - path: /usr/bin/npm
+      - path: /usr/local/bin/npm
 
-    # --- DNS (required for hostname resolution) ---
-    # Note: OpenShell typically handles DNS transparently, but explicit here for clarity
-    - name: dns-udp-read
-      endpoints:
-        - host: 1.1.1.1
-          port: 53
-          protocol: udp
-          enforcement: enforce
-          access: read-only
-        - host: 8.8.8.8
-          port: 53
-          protocol: udp
-          enforcement: enforce
-          access: read-only
-      binaries:
-        - { path: /usr/local/bin/node }
-        - { path: /usr/bin/node }
-        - { path: /usr/bin/curl }
-        - { path: /usr/bin/git }
-        - { path: /usr/bin/npm }
-        - { path: /usr/local/bin/npm }
-
-    - name: dns-tcp-read
-      endpoints:
-        - host: 1.1.1.1
-          port: 53
-          protocol: tcp
-          enforcement: enforce
-          access: read-only
-        - host: 8.8.8.8
-          port: 53
-          protocol: tcp
-          enforcement: enforce
-          access: read-only
-      binaries:
-        - { path: /usr/local/bin/node }
-        - { path: /usr/bin/node }
-        - { path: /usr/bin/curl }
-        - { path: /usr/bin/git }
-        - { path: /usr/bin/npm }
-        - { path: /usr/local/bin/npm }
-
-# Compatibility alias for schema validators that still expect top-level terms.
-terms: *network_terms
+  telegram_api_write:
+    name: telegram-api-write
+    endpoints:
+      - host: api.telegram.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - path: /usr/local/bin/node
+      - path: /usr/bin/node
