@@ -13,7 +13,7 @@
 # descriptions or API docs.
 # =============================================================================
 
-version: 1
+version: 1 
 
 # --- Filesystem policy (locked at sandbox creation) ---
 filesystem_policy:
@@ -45,55 +45,52 @@ process: {}
 # --- Network policies (hot-reloadable at runtime) ---
 # Only LLM API endpoints are allowed. All other outbound connections are denied.
 network_policies:
-  anthropic_api:
-    name: anthropic-api-write
-    endpoints:
-      - host: api.anthropic.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write     # POST for chat completions
-    binaries:
-      - { path: /usr/local/bin/node }
-      - { path: /usr/bin/node }
+  terms:
+    - name: anthropic-api-write
+      endpoints:
+        - host: api.anthropic.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          access: read-write     # POST for chat completions
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }
 
-  openai_api:
-    name: openai-api-write
-    endpoints:
-      - host: api.openai.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - { path: /usr/local/bin/node }
-      - { path: /usr/bin/node }
+    - name: openai-api-write
+      endpoints:
+        - host: api.openai.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          access: read-write
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }
 
-  openrouter_api:
-    name: openrouter-api-write
-    endpoints:
-      - host: openrouter.ai
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - { path: /usr/local/bin/node }
-      - { path: /usr/bin/node }
+    - name: openrouter-api-write
+      endpoints:
+        - host: openrouter.ai
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          access: read-write
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }
 
-  ollama_local:
-    name: ollama-local-write
-    endpoints:
-      - host: 127.0.0.1
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: localhost
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - { path: /usr/local/bin/node }
-      - { path: /usr/bin/node }
+    - name: ollama-local-write
+      endpoints:
+        - host: 127.0.0.1
+          port: 11434
+          protocol: rest
+          enforcement: enforce
+          access: read-write
+        - host: localhost
+          port: 11434
+          protocol: rest
+          enforcement: enforce
+          access: read-write
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }

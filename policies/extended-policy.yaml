@@ -38,97 +38,91 @@ landlock:
 process: {}  # do not override — openclaw image uses 'node' user
 
 network_policies:
-  # --- LLM APIs ---
-  anthropic_api:
-    name: anthropic-api-write
-    endpoints:
-      - host: api.anthropic.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - { path: /usr/local/bin/node }
-      - { path: /usr/bin/node }
+  terms:
+    # --- LLM APIs ---
+    - name: anthropic-api-write
+      endpoints:
+        - host: api.anthropic.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          access: read-write
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }
 
-  openai_api:
-    name: openai-api-write
-    endpoints:
-      - host: api.openai.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - { path: /usr/local/bin/node }
-      - { path: /usr/bin/node }
+    - name: openai-api-write
+      endpoints:
+        - host: api.openai.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          access: read-write
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }
 
-  ollama_local:
-    name: ollama-local-write
-    endpoints:
-      - host: 127.0.0.1
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: localhost
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - { path: /usr/local/bin/node }
-      - { path: /usr/bin/node }
+    - name: ollama-local-write
+      endpoints:
+        - host: 127.0.0.1
+          port: 11434
+          protocol: rest
+          enforcement: enforce
+          access: read-write
+        - host: localhost
+          port: 11434
+          protocol: rest
+          enforcement: enforce
+          access: read-write
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }
 
-  ollama_cloud:
-    name: ollama-cloud-write
-    endpoints:
-      - host: ollama.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - { path: /usr/local/bin/node }
-      - { path: /usr/bin/node }
+    - name: ollama-cloud-write
+      endpoints:
+        - host: ollama.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          access: read-write
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }
 
-  # --- GitHub (read-only) ---
-  github_api:
-    name: github-api-read
-    endpoints:
-      - host: api.github.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only        # GET only — no issue creation or pushes
-    binaries:
-      - { path: /usr/bin/curl }
-      - { path: /usr/local/bin/node }
-      - { path: /usr/bin/git }
+    # --- GitHub (read-only) ---
+    - name: github-api-read
+      endpoints:
+        - host: api.github.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          access: read-only        # GET only — no issue creation or pushes
+      binaries:
+        - { path: /usr/bin/curl }
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/git }
 
-  github_raw:
-    name: github-raw-read
-    endpoints:
-      - host: raw.githubusercontent.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-    binaries:
-      - { path: /usr/bin/curl }
+    - name: github-raw-read
+      endpoints:
+        - host: raw.githubusercontent.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          access: read-only
+      binaries:
+        - { path: /usr/bin/curl }
 
-  # --- npm registry (read-only, for installing packages) ---
-  npm_registry:
-    name: npm-registry-read
-    endpoints:
-      - host: registry.npmjs.org
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-    binaries:
-      - { path: /usr/bin/npm }
-      - { path: /usr/local/bin/npm }
+    # --- npm registry (read-only, for installing packages) ---
+    - name: npm-registry-read
+      endpoints:
+        - host: registry.npmjs.org
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          access: read-only
+      binaries:
+        - { path: /usr/bin/npm }
+        - { path: /usr/local/bin/npm }
 
-  # --- DNS (required for hostname resolution) ---
-  # Note: OpenShell typically handles DNS transparently, but explicit here for clarity
+    # --- DNS (required for hostname resolution) ---
+    # Note: OpenShell typically handles DNS transparently, but explicit here for clarity
