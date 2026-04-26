@@ -38,7 +38,7 @@ landlock:
 process: {}  # do not override — openclaw image uses 'node' user
 
 network_policies:
-  terms:
+  terms: &network_terms
     # --- LLM APIs ---
     - name: anthropic-api-write
       endpoints:
@@ -54,6 +54,17 @@ network_policies:
     - name: openai-api-write
       endpoints:
         - host: api.openai.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          access: read-write
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }
+
+    - name: openrouter-api-write
+      endpoints:
+        - host: openrouter.ai
           port: 443
           protocol: rest
           enforcement: enforce
@@ -126,3 +137,45 @@ network_policies:
 
     # --- DNS (required for hostname resolution) ---
     # Note: OpenShell typically handles DNS transparently, but explicit here for clarity
+    - name: dns-udp-read
+      endpoints:
+        - host: 1.1.1.1
+          port: 53
+          protocol: udp
+          enforcement: enforce
+          access: read-only
+        - host: 8.8.8.8
+          port: 53
+          protocol: udp
+          enforcement: enforce
+          access: read-only
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }
+        - { path: /usr/bin/curl }
+        - { path: /usr/bin/git }
+        - { path: /usr/bin/npm }
+        - { path: /usr/local/bin/npm }
+
+    - name: dns-tcp-read
+      endpoints:
+        - host: 1.1.1.1
+          port: 53
+          protocol: tcp
+          enforcement: enforce
+          access: read-only
+        - host: 8.8.8.8
+          port: 53
+          protocol: tcp
+          enforcement: enforce
+          access: read-only
+      binaries:
+        - { path: /usr/local/bin/node }
+        - { path: /usr/bin/node }
+        - { path: /usr/bin/curl }
+        - { path: /usr/bin/git }
+        - { path: /usr/bin/npm }
+        - { path: /usr/local/bin/npm }
+
+# Compatibility alias for schema validators that still expect top-level terms.
+terms: *network_terms
