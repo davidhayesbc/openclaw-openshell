@@ -7,6 +7,7 @@ This document covers the security model, threat mitigations, and operational sec
 ## Threat Model
 
 OpenClaw is an AI agent with the ability to:
+
 - Receive messages from external platforms (Telegram, Discord, WhatsApp)
 - Execute shell commands (if enabled)
 - Access the local filesystem (if enabled)
@@ -15,7 +16,7 @@ OpenClaw is an AI agent with the ability to:
 The primary threats are:
 
 | Threat | Mitigation |
-|--------|-----------|
+| -------- | ----------- |
 | Prompt injection causing shell exec | `tools.exec.security: deny` + OpenShell process policy |
 | Data exfiltration via outbound requests | OpenShell network policy (deny all except LLM APIs) |
 | Unauthorized access to the Control UI | Loopback-only binding + strong auth token |
@@ -33,12 +34,14 @@ Before deploying, harden the host:
 1. **Dedicated machine or VM** — Do not run this on a shared system.
 2. **Keep OS and Docker updated** — Enable automatic security updates.
 3. **Firewall: default-deny inbound** — Only open ports you explicitly need.
+
    ```bash
    # Example: allow SSH and nothing else inbound
    sudo ufw default deny incoming
    sudo ufw allow ssh
    sudo ufw enable
    ```
+
 4. **Non-root user** — Don't run Docker or OpenShell as root.
 5. **Disk encryption** — If credentials or workspace data persists on disk, encrypt the volume.
 6. **No Docker socket exposure** — Never expose `/var/run/docker.sock` unless strictly required and isolated.
@@ -70,6 +73,7 @@ pre-commit run --all-files  # scan all existing files
 ```
 
 Install gitleaks standalone for CI:
+
 ```bash
 # macOS
 brew install gitleaks
@@ -101,6 +105,7 @@ openshell policy set openclaw --policy policies/base-policy.yaml --wait
 ```
 
 All policy changes are logged. To review:
+
 ```bash
 openshell logs openclaw --tail
 ```
@@ -121,7 +126,8 @@ By default, the gateway is loopback-only (`127.0.0.1`). **Do not expose it direc
 
 Use one of these patterns:
 
-**Option A — Tailscale (recommended for personal use)**
+** Option A — Tailscale (recommended for personal use)**
+
 ```bash
 # Install Tailscale on the host and your devices
 # The gateway is only accessible from your Tailscale network
@@ -131,6 +137,7 @@ Use one of these patterns:
 **Option B — Caddy reverse proxy with HTTPS**
 
 Create `caddy/Caddyfile`:
+
 ```
 openclaw.yourdomain.com {
     basicauth / {
@@ -144,6 +151,7 @@ openclaw.yourdomain.com {
 Run Caddy as a host service and proxy to the OpenShell-forwarded local port (`127.0.0.1:18789`). Keep the gateway bound to loopback only.
 
 **Option C — SSH tunnel**
+
 ```bash
 # From your remote machine:
 ssh -L 18789:127.0.0.1:18789 user@your-server
@@ -171,6 +179,7 @@ Every person who can send a DM to the bot has the bot's full tool permission set
 ```
 
 After starting, pair your account:
+
 ```bash
 # Inside the sandbox or container
 openclaw channels pair --channel telegram
@@ -225,6 +234,7 @@ tools: {
 Configure host log retention to your compliance requirements and keep OpenShell policy/audit logs for incident investigation.
 
 To view logs:
+
 ```bash
 openshell logs openclaw --tail
 ```
@@ -274,7 +284,7 @@ bash scripts/start.sh
 ## Regular Maintenance
 
 | Task | Frequency | Command |
-|------|-----------|---------|
+| ------ | ----------- | --------- |
 | Security audit | Weekly | `bash scripts/audit.sh` |
 | Check for updates | Weekly | `bash scripts/update.sh --check` |
 | Apply updates | Monthly | `bash scripts/update.sh` |
