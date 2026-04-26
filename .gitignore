@@ -1,0 +1,27 @@
+# --- Secrets & credentials (NEVER commit these) ---
+.env
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# OpenClaw runtime data (contains session data, credentials, tokens)
+openclaw-config/
+openclaw-workspace/
+
+# OpenShell state
+.openshell/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs (contain sensitive data)
+*.log
+logs/
+
+# Docker build artifacts
+*.tar

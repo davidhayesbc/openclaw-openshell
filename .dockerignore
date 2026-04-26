@@ -1,0 +1,8 @@
+.env
+.git
+*.log
+openclaw-config/
+openclaw-workspace/
+docs/
+secrets/
+.pre-commit-config.yaml

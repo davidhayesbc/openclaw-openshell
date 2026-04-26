@@ -1,0 +1,81 @@
+# =============================================================================
+# OpenShell Policy: Base (Minimal) — for OpenClaw Sandbox
+# =============================================================================
+# This is the starting point: maximum restriction.
+# Only allows outbound connections to Anthropic and OpenAI APIs.
+#
+# Apply with:
+#   openshell policy set ${OPENSHELL_SANDBOX_NAME:-openclaw} \
+#     --policy policies/base-policy.yaml --wait
+#
+# To extend access, use policies/extended-policy.yaml or create a custom one.
+# Use `openshell policy generate` to generate policies from plain-language
+# descriptions or API docs.
+# =============================================================================
+
+version: 1
+
+# --- Filesystem policy (locked at sandbox creation) ---
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /usr
+    - /lib
+    - /lib64
+    - /proc
+    - /dev/urandom
+    - /app
+    - /etc
+    - /var/log
+  read_write:
+    - /sandbox
+    - /tmp
+    - /dev/null
+    - /home/node/.openclaw
+
+landlock:
+  compatibility: best_effort    # fall back gracefully on older kernels
+
+# --- Process policy (locked at sandbox creation) ---
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+# --- Network policies (hot-reloadable at runtime) ---
+# Only LLM API endpoints are allowed. All other outbound connections are denied.
+network_policies:
+  anthropic_api:
+    name: anthropic-api-write
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write     # POST for chat completions
+    binaries:
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/node }
+
+  openai_api:
+    name: openai-api-write
+    endpoints:
+      - host: api.openai.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/node }
+
+  openrouter_api:
+    name: openrouter-api-write
+    endpoints:
+      - host: openrouter.ai
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/node }

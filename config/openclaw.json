@@ -1,0 +1,103 @@
+// =============================================================================
+// OpenClaw Gateway — Hardened Configuration
+// =============================================================================
+// This file is committed to git. It contains NO secrets.
+// All secrets are injected via environment variables at runtime.
+//
+// Secrets (set in .env, never committed):
+//   OPENCLAW_GATEWAY_TOKEN    — auth token for gateway access
+//   ANTHROPIC_API_KEY         — Anthropic API key
+//   OPENAI_API_KEY            — OpenAI API key
+//   TELEGRAM_BOT_TOKEN        — Telegram bot token (if used)
+//   DISCORD_BOT_TOKEN         — Discord bot token (if used)
+//
+// After editing this file, restart the gateway:
+//   docker compose restart openclaw-gateway
+// Or in OpenShell:
+//   openshell sandbox connect openclaw  (then restart the daemon inside)
+// =============================================================================
+{
+  gateway: {
+    mode: "local",
+
+    // loopback = only accessible from localhost.
+    // Change to "lan" in .env (OPENCLAW_GATEWAY_BIND=lan) only if you need
+    // remote access AND have configured the reverse proxy (see docs/security.md).
+    bind: "loopback",
+
+    // Token is read from OPENCLAW_GATEWAY_TOKEN env var automatically.
+    // Never put the actual token here.
+    auth: { mode: "token" },
+
+    controlUi: {
+      // Restrict the Control UI to localhost origins only
+      allowedOrigins: [
+        "http://localhost:18789",
+        "http://127.0.0.1:18789",
+      ],
+    },
+  },
+
+  session: {
+    // Per-channel-peer: each unique sender gets their own session context.
+    // Prevents one user's context from leaking to another.
+    dmScope: "per-channel-peer",
+  },
+
+  tools: {
+    // "messaging" profile: enables only communication tools.
+    // Automation, runtime execution, and filesystem tools are disabled.
+    profile: "messaging",
+
+    // Explicitly deny high-blast-radius tools
+    deny: [
+      "group:automation",     // no automated scheduling/task-runners
+      "group:runtime",        // no shell exec
+      "group:fs",             // no arbitrary file access
+      "sessions_spawn",       // no spawning new sessions
+      "sessions_send",        // no sending to other sessions
+    ],
+
+    fs: {
+      workspaceOnly: true,    // file access limited to the agent workspace
+    },
+
+    exec: {
+      security: "deny",       // block shell execution entirely by default
+      ask: "always",          // if you re-enable exec, always ask first
+    },
+
+    elevated: {
+      enabled: false,         // disable elevated/privileged tool operations
+    },
+  },
+
+  // Logging — redact sensitive values from logs
+  logging: {
+    redactSensitive: "tools",  // redact tool call content (may contain credentials)
+    level: "info",
+  },
+
+  // Channel defaults — per-channel overrides go in their own block
+  channels: {
+    // DM policy: only accept messages from explicitly paired/allowed senders.
+    // Change per channel as needed — see docs/security.md for guidance.
+
+    // Telegram example (uncomment and configure when adding Telegram):
+    // telegram: {
+    //   dmPolicy: "pairing",  // only respond to explicitly paired users
+    // },
+
+    // Discord example:
+    // discord: {
+    //   dmPolicy: "pairing",
+    //   servers: { "*": { requireMention: true } },
+    // },
+
+    // WhatsApp example:
+    // whatsapp: {
+    //   dmPolicy: "pairing",
+    //   groups: { "*": { requireMention: true } },
+    // },
+  },
+}

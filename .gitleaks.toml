@@ -1,0 +1,29 @@
+# gitleaks configuration — prevents committing secrets
+# https://github.com/gitleaks/gitleaks
+
+title = "openclaw-openshell gitleaks config"
+
+[extend]
+  useDefault = true
+
+[[rules]]
+  id = "openclaw-gateway-token"
+  description = "OpenClaw Gateway Token"
+  regex = '''OPENCLAW_GATEWAY_TOKEN\s*=\s*['"']?[A-Za-z0-9_\-]{16,}['"']?'''
+  tags = ["openclaw", "token"]
+
+[[rules]]
+  id = "anthropic-api-key"
+  description = "Anthropic API Key"
+  regex = '''sk-ant-[A-Za-z0-9\-_]{32,}'''
+  tags = ["api-key", "anthropic"]
+
+[[rules]]
+  id = "openai-api-key"
+  description = "OpenAI API Key"
+  regex = '''sk-[A-Za-z0-9]{32,}'''
+  tags = ["api-key", "openai"]
+
+[allowlist]
+  # Never scan the example env file (it has placeholder values, not real secrets)
+  paths = [".env.example", "docs/security.md", "README.md"]
