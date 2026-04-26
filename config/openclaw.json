@@ -77,6 +77,38 @@
     level: "info",
   },
 
+  // Optional local model provider (Ollama) for in-sandbox inference.
+  // This uses the native Ollama API endpoint (no /v1 path).
+  models: {
+    providers: {
+      ollama: {
+        api: "ollama",
+        baseUrl: "http://127.0.0.1:11434",
+        apiKey: "OLLAMA_API_KEY",
+        models: [
+          {
+            id: "gemma4:e4b",
+            name: "gemma4:e4b",
+            input: ["text"],
+            reasoning: false,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 128000,
+            maxTokens: 8192,
+          },
+        ],
+      },
+    },
+  },
+
+  agents: {
+    defaults: {
+      // Keep your primary model unchanged unless you explicitly select Gemma 4.
+      models: {
+        "ollama/gemma4:e4b": { alias: "gemma4" },
+      },
+    },
+  },
+
   // Channel defaults — per-channel overrides go in their own block
   channels: {
     // DM policy: only accept messages from explicitly paired/allowed senders.

@@ -49,15 +49,17 @@ echo ""
 # Required
 check_var "OPENCLAW_GATEWAY_TOKEN"
 
-# At least one LLM key must be set
-ANTHROPIC=$(grep -E "^ANTHROPIC_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
-OPENAI=$(grep -E "^OPENAI_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
-OPENROUTER=$(grep -E "^OPENROUTER_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
+# At least one LLM provider credential must be set
+ANTHROPIC=$(grep -E "^ANTHROPIC_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+OPENAI=$(grep -E "^OPENAI_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+OPENROUTER=$(grep -E "^OPENROUTER_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+OLLAMA=$(grep -E "^OLLAMA_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
 
 if [[ -z "$ANTHROPIC" || "$ANTHROPIC" == *REPLACE* ]] && \
-   [[ -z "$OPENAI"    || "$OPENAI"    == *REPLACE* ]] && \
-   [[ -z "$OPENROUTER"|| "$OPENROUTER"== *REPLACE* ]]; then
-  echo "MISSING: At least one of ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY must be set"
+   [[ -z "$OPENAI" || "$OPENAI" == *REPLACE* ]] && \
+   [[ -z "$OPENROUTER" || "$OPENROUTER" == *REPLACE* ]] && \
+   [[ -z "$OLLAMA" || "$OLLAMA" == *REPLACE* ]]; then
+  echo "MISSING: At least one of ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY / OLLAMA_API_KEY must be set"
   ERRORS=$((ERRORS + 1))
 else
   echo "OK: at least one LLM provider key is set"

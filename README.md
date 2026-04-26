@@ -8,24 +8,24 @@ A security-hardened, git-tracked setup for running [OpenClaw](https://openclaw.a
 ┌──────────────────────────────────────────────────────────┐
 │  Host Machine                                            │
 │                                                          │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │  OpenShell Gateway (K3s-in-Docker)               │    │
-│  │                                                  │    │
-│  │  ┌──────────────────────────────────────────┐   │    │
-│  │  │  OpenClaw Sandbox                        │   │    │
-│  │  │                                          │   │    │
-│  │  │  ┌──────────┐  ┌──────────────────────┐ │   │    │
-│  │  │  │ OpenClaw │  │  Policy Engine       │ │   │    │
-│  │  │  │ Gateway  │  │  - Network: block all│ │   │    │
-│  │  │  │ :18789   │  │    except LLM APIs   │ │   │    │
-│  │  │  │          │  │  - FS: workspace only│ │   │    │
-│  │  │  │          │  │  - Process: no privesc│ │   │    │
-│  │  │  └──────────┘  └──────────────────────┘ │   │    │
-│  │  └──────────────────────────────────────────┘   │    │
-│  └─────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────┐     │
+│  │  OpenShell Gateway (K3s-in-Docker)              │     │
+│  │                                                 │     │
+│  │  ┌──────────────────────────────────────────┐   │     │
+│  │  │  OpenClaw Sandbox                        │   │     │
+│  │  │                                          │   │     │
+│  │  │  ┌──────────┐  ┌──────────────────────┐  │   │     │
+│  │  │  │ OpenClaw │  │  Policy Engine       │  │   │     │
+│  │  │  │ Gateway  │  │  - Network: block all│  │   │     │
+│  │  │  │ :18789   │  │    except LLM APIs   │  │   │     │
+│  │  │  │          │  │  - FS: workspace only│  │   │     │
+│  │  │  │          │  │  - Process: no privesc│ │   │     │
+│  │  │  └──────────┘  └──────────────────────┘  │   │     │
+│  │  └──────────────────────────────────────────┘   │     │
+│  └─────────────────────────────────────────────────┘     │
 │                           │                              │
 │              port-forward ↓ (127.0.0.1:18789)            │
-│                    Browser / CLI                          │
+│                    Browser / CLI                         │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -101,6 +101,7 @@ bash scripts/audit.sh --deep
 - `tools.fs.workspaceOnly: true` — no host filesystem access
 - `tools.elevated.enabled: false` — no privileged operations
 - `session.dmScope: per-channel-peer` — session isolation
+- `models.providers.ollama` — native Ollama API support for local models (e.g. Gemma 4)
 
 ---
 
@@ -110,8 +111,8 @@ Policies live in `policies/` and are tracked in git.
 
 | Policy | Allows |
 |--------|--------|
-| `base-policy.yaml` | Anthropic API, OpenAI API, OpenRouter only |
-| `extended-policy.yaml` | Base + GitHub read-only, npm |
+| `base-policy.yaml` | Anthropic/OpenAI/OpenRouter + local Ollama (`127.0.0.1:11434`) |
+| `extended-policy.yaml` | Base + Ollama Cloud (`ollama.com`) + GitHub read-only + npm |
 
 ```bash
 # Apply base (minimal) policy
@@ -125,6 +126,34 @@ openshell policy set openclaw --policy policies/extended-policy.yaml --wait
 # ... do work ...
 openshell policy set openclaw --policy policies/base-policy.yaml --wait
 ```
+
+---
+
+## Ollama + Gemma 4 (Sandbox)
+
+Use this when you want local inference through Ollama while keeping OpenShell policy enforcement.
+
+```bash
+# 1) Enable Ollama provider in .env
+echo 'OLLAMA_API_KEY=ollama-local' >> .env
+
+# 2) Ensure Ollama is reachable at 127.0.0.1:11434 from the sandbox
+# (If running locally, start Ollama on the host and make it reachable to the sandbox runtime)
+
+# 3) Pull Gemma 4 in Ollama
+ollama pull gemma4
+
+# 4) Restart OpenClaw sandbox so config/env are reloaded
+bash scripts/stop.sh
+bash scripts/start.sh
+
+# 5) Select Gemma 4 in OpenClaw
+openclaw models set ollama/gemma4
+```
+
+Notes:
+- `config/openclaw.json` already includes an Ollama provider entry and a `gemma4` alias.
+- Use native Ollama URL format only (`http://...:11434`), not `/v1`.
 
 ---
 
