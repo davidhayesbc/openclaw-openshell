@@ -75,8 +75,10 @@ docker image inspect openclaw:local >/dev/null 2>&1 \
 log "Checking OpenShell gateway..."
 if ! openshell gateway info >/dev/null 2>&1; then
   warn "OpenShell gateway is not reachable. Attempting to start it..."
-  openshell gateway start 2>&1 | tee /tmp/openclaw-gateway-start.log \
-    || die "OpenShell gateway failed to start. See /tmp/openclaw-gateway-start.log"
+  if ! openshell gateway start > /tmp/openclaw-gateway-start.log 2>&1; then
+    tail -30 /tmp/openclaw-gateway-start.log >&2 || true
+    die "OpenShell gateway failed to start. See /tmp/openclaw-gateway-start.log"
+  fi
 fi
 
 GATEWAY_REACHABLE=false
@@ -90,9 +92,11 @@ done
 
 if [[ "${GATEWAY_REACHABLE}" != true ]]; then
   warn "OpenShell gateway still unreachable. Recreating gateway..."
-  openshell gateway destroy --name openshell 2>&1 | tee /tmp/openclaw-gateway-recover.log || true
-  openshell gateway start 2>&1 | tee -a /tmp/openclaw-gateway-recover.log \
-    || die "OpenShell gateway recovery failed. See /tmp/openclaw-gateway-recover.log"
+  openshell gateway destroy --name openshell > /tmp/openclaw-gateway-recover.log 2>&1 || true
+  if ! openshell gateway start >> /tmp/openclaw-gateway-recover.log 2>&1; then
+    tail -30 /tmp/openclaw-gateway-recover.log >&2 || true
+    die "OpenShell gateway recovery failed. See /tmp/openclaw-gateway-recover.log"
+  fi
 
   for i in $(seq 1 30); do
     if openshell sandbox list >/dev/null 2>&1; then
@@ -138,8 +142,8 @@ fi
 # ---------------------------------------------------------------------------
 # Step 1: Create the sandbox pod
 #
-# We run WITHOUT a command so 'openshell sandbox create' just creates the pod
-# and exits immediately (the interactive shell gets EOF from redirected stdin).
+# We run with a no-op command in no-TTY mode so create is always
+# non-interactive and returns immediately after the pod is created.
 # Connectivity to the OpenShell gateway can be transient, so we retry create
 # and recover by restarting the gateway when transport errors are detected.
 # ---------------------------------------------------------------------------
@@ -150,7 +154,9 @@ if [[ "${SANDBOX_EXISTS}" != true ]]; then
     if openshell sandbox create \
       --name "${SANDBOX_NAME}" \
       --from openclaw \
+      --no-tty \
       </dev/null \
+      -- true \
       2>&1 | tee "${CREATE_LOG}"; then
       CREATE_OK=true
       break
@@ -159,7 +165,7 @@ if [[ "${SANDBOX_EXISTS}" != true ]]; then
     warn "Sandbox create attempt ${attempt}/3 failed."
     if grep -qiE "Gateway .*not reachable|transport error|tls handshake|Connection reset|Connection refused" "${CREATE_LOG}"; then
       warn "Detected gateway connectivity error; restarting OpenShell gateway and retrying..."
-      openshell gateway start 2>&1 | tee /tmp/openclaw-gateway-start.log || true
+      openshell gateway start > /tmp/openclaw-gateway-start.log 2>&1 || true
     fi
     sleep 2
   done
