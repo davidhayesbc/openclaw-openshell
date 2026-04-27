@@ -176,21 +176,14 @@ log "Syncing repo config into sandbox OpenClaw home..."
 openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'mkdir -p "$HOME/.openclaw"'
 # Inject the gateway token from .env into the config before writing it to the
 # sandbox. config/openclaw.json sets auth.mode="token" but deliberately omits
-# the token value (it's a secret). We merge it here via node so the gateway
-# token matches what callers expect.
-node -e "
-  const fs=require('fs');
-  const cfg=JSON.parse(fs.readFileSync('config/openclaw.json','utf8'));
-  cfg.gateway = cfg.gateway || {};
-  cfg.gateway.auth = cfg.gateway.auth || {};
-  cfg.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
-  // Allow overriding Ollama endpoint per-machine (for sandbox network topology).
-  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL;
-  if (ollamaBaseUrl && cfg?.models?.providers?.ollama) {
-    cfg.models.providers.ollama.baseUrl = ollamaBaseUrl;
-  }
-  process.stdout.write(JSON.stringify(cfg,null,2));
-" \
+# the token value (it's a secret). We merge inside the sandbox via node so
+# startup does not depend on host-side node being installed.
+cat config/openclaw.json \
+  | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+      env \
+        OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN}" \
+        OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-}" \
+        node -e 'let raw="";process.stdin.setEncoding("utf8");process.stdin.on("data",(chunk)=>{raw+=chunk;});process.stdin.on("end",()=>{const cfg=JSON.parse(raw);cfg.gateway=cfg.gateway||{};cfg.gateway.auth=cfg.gateway.auth||{};cfg.gateway.auth.token=process.env.OPENCLAW_GATEWAY_TOKEN;const ollamaBaseUrl=process.env.OLLAMA_BASE_URL;if(ollamaBaseUrl&&cfg.models&&cfg.models.providers&&cfg.models.providers.ollama){cfg.models.providers.ollama.baseUrl=ollamaBaseUrl;}process.stdout.write(JSON.stringify(cfg,null,2));});' \
   | openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'cat > "$HOME/.openclaw/openclaw.json"'
 
 # ---------------------------------------------------------------------------

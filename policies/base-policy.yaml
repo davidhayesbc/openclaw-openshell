@@ -110,6 +110,16 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-write
+      - host: 10.255.255.254
+        port: 11434
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: 192.168.50.21
+        port: 11434
+        protocol: rest
+        enforcement: enforce
+        access: read-write
     binaries:
       - path: /usr/local/bin/node
       - path: /usr/bin/node
