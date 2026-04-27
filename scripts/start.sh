@@ -36,7 +36,7 @@ fi
 set -o allexport; source .env; set +o allexport
 
 log "Validating environment..."
-scripts/validate-env.sh
+bash scripts/validate-env.sh
 
 SANDBOX_NAME="${OPENSHELL_SANDBOX_NAME:-openclaw}"
 GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
@@ -47,6 +47,8 @@ GW_EXEC_PID_FILE="/tmp/openclaw-gw-exec.pid"
 SSH_CONFIG_FILE="/tmp/openclaw-ssh.conf"
 
 command -v openshell >/dev/null 2>&1 || die "OpenShell CLI not found. Run scripts/install.sh first."
+command -v ssh      >/dev/null 2>&1 || die "ssh not found. Install openssh-client and retry."
+command -v curl     >/dev/null 2>&1 || die "curl not found. Install curl and retry."
 
 # ---------------------------------------------------------------------------
 # Validate Docker service is running
@@ -57,6 +59,51 @@ if command -v docker >/dev/null 2>&1; then
 else
   die "Docker not found. Install Docker and ensure the service is running before starting OpenClaw."
 fi
+
+# Verify openclaw:local Docker image was built by update.sh
+log "Checking openclaw:local image..."
+docker image inspect openclaw:local >/dev/null 2>&1 \
+  || die "Docker image 'openclaw:local' not found. Run scripts/update.sh first."
+
+# Verify repo config exists
+[[ -f config/openclaw.json ]] \
+  || die "config/openclaw.json not found. Run scripts/install.sh first."
+
+# ---------------------------------------------------------------------------
+# Validate OpenShell gateway connectivity
+# ---------------------------------------------------------------------------
+log "Checking OpenShell gateway..."
+if ! openshell gateway info >/dev/null 2>&1; then
+  warn "OpenShell gateway is not reachable. Attempting to start it..."
+  openshell gateway start > /tmp/openclaw-gateway-start.log 2>&1 \
+    || die "OpenShell gateway failed to start. See /tmp/openclaw-gateway-start.log"
+fi
+
+GATEWAY_REACHABLE=false
+for i in $(seq 1 30); do
+  if openshell sandbox list >/dev/null 2>&1; then
+    GATEWAY_REACHABLE=true
+    break
+  fi
+  sleep 1
+done
+
+if [[ "${GATEWAY_REACHABLE}" != true ]]; then
+  warn "OpenShell gateway still unreachable. Recreating gateway..."
+  openshell gateway destroy --name openshell > /tmp/openclaw-gateway-recover.log 2>&1 || true
+  openshell gateway start >> /tmp/openclaw-gateway-recover.log 2>&1 \
+    || die "OpenShell gateway recovery failed. See /tmp/openclaw-gateway-recover.log"
+
+  for i in $(seq 1 30); do
+    if openshell sandbox list >/dev/null 2>&1; then
+      GATEWAY_REACHABLE=true
+      break
+    fi
+    sleep 1
+  done
+fi
+
+$GATEWAY_REACHABLE || die "OpenShell gateway is not responding. See /tmp/openclaw-gateway-recover.log"
 
 # ---------------------------------------------------------------------------
 # Detect if sandbox is already running and healthy
@@ -94,15 +141,30 @@ fi
 #
 # We run WITHOUT a command so 'openshell sandbox create' just creates the pod
 # and exits immediately (the interactive shell gets EOF from redirected stdin).
-# The sandbox persists without --no-keep. Output is redirected to suppress the
-# TUI spinner (which would cause SIGTSTP if backgrounded with a live terminal).
+# Connectivity to the OpenShell gateway can be transient, so we retry create
+# and recover by restarting the gateway when transport errors are detected.
 # ---------------------------------------------------------------------------
 CREATE_LOG="/tmp/openclaw-create.log"
 if [[ "${SANDBOX_EXISTS}" != true ]]; then
-  openshell sandbox create \
-    --name "${SANDBOX_NAME}" \
-    --from openclaw \
-    > "${CREATE_LOG}" 2>&1 &
+  CREATE_OK=false
+  for attempt in $(seq 1 3); do
+    if openshell sandbox create \
+      --name "${SANDBOX_NAME}" \
+      --from openclaw \
+      > "${CREATE_LOG}" 2>&1; then
+      CREATE_OK=true
+      break
+    fi
+
+    warn "Sandbox create attempt ${attempt}/3 failed."
+    if grep -qiE "Gateway .*not reachable|transport error|tls handshake|Connection reset|Connection refused" "${CREATE_LOG}"; then
+      warn "Detected gateway connectivity error; restarting OpenShell gateway and retrying..."
+      openshell gateway start > /tmp/openclaw-gateway-start.log 2>&1 || true
+    fi
+    sleep 2
+  done
+
+  $CREATE_OK || die "Failed to create sandbox '${SANDBOX_NAME}'. See ${CREATE_LOG}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -173,7 +235,8 @@ openshell sandbox exec --name "${SANDBOX_NAME}" -- \
     --skip-daemon \
     --skip-health \
     --skip-search \
-    --skip-skills
+    --skip-skills \
+  || die "openclaw onboard failed inside sandbox. Check sandbox connectivity and that openclaw is installed in the image."
 
 # ---------------------------------------------------------------------------
 # Step 5b: Sync committed gateway config into the sandbox
@@ -195,6 +258,10 @@ cat config/openclaw.json \
         OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-}" \
         node -e 'let raw="";process.stdin.setEncoding("utf8");process.stdin.on("data",(chunk)=>{raw+=chunk;});process.stdin.on("end",()=>{const cfg=JSON.parse(raw);cfg.gateway=cfg.gateway||{};cfg.gateway.auth=cfg.gateway.auth||{};cfg.gateway.auth.token=process.env.OPENCLAW_GATEWAY_TOKEN;const ollamaBaseUrl=process.env.OLLAMA_BASE_URL;if(ollamaBaseUrl&&cfg.models&&cfg.models.providers&&cfg.models.providers.ollama){cfg.models.providers.ollama.baseUrl=ollamaBaseUrl;}process.stdout.write(JSON.stringify(cfg,null,2));});' \
   | openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'cat > "$HOME/.openclaw/openclaw.json"'
+openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc \
+  'test -s "$HOME/.openclaw/openclaw.json" && echo config_synced' \
+  | grep -q "config_synced" \
+  || die "Failed to sync config/openclaw.json into sandbox — config file missing or empty."
 
 # ---------------------------------------------------------------------------
 # Step 5c: Sync agent workspace files into the sandbox
@@ -272,6 +339,19 @@ fi
 # Instead, we use 'openshell sandbox ssh-config' to get SSH connection details
 # and run a plain 'ssh -N -L' tunnel — fully independent of sandbox create.
 # ---------------------------------------------------------------------------
+# Clean up stale SSH forward and gateway exec processes from any previous run
+for _pid_file in "${SSH_FWD_PID_FILE}" "${GW_EXEC_PID_FILE}"; do
+  if [[ -f "${_pid_file}" ]]; then
+    _old_pid=$(cat "${_pid_file}" 2>/dev/null || true)
+    if [[ -n "${_old_pid}" ]] && kill -0 "${_old_pid}" 2>/dev/null; then
+      log "Stopping stale process (PID ${_old_pid}) from previous run..."
+      kill "${_old_pid}" 2>/dev/null || true
+      sleep 1
+    fi
+    rm -f "${_pid_file}"
+  fi
+done
+
 log "Setting up port forward localhost:${GATEWAY_PORT} → sandbox:${GATEWAY_PORT}..."
 openshell sandbox ssh-config "${SANDBOX_NAME}" > "${SSH_CONFIG_FILE}"
 
@@ -345,7 +425,11 @@ for i in $(seq 1 60); do
   fi
   sleep 1
 done
-$GATEWAY_HEALTHY || warn "Gateway not responding on port ${GATEWAY_PORT}. Check: ${GW_EXEC_LOG}"
+if ! $GATEWAY_HEALTHY; then
+  warn "Gateway not responding on port ${GATEWAY_PORT}. Last gateway log:"
+  tail -30 "${GW_EXEC_LOG}" >&2
+  die "Gateway failed to start. Full log: ${GW_EXEC_LOG}"
+fi
 
 # ---------------------------------------------------------------------------
 log ""
