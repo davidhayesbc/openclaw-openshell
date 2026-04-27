@@ -1,39 +1,34 @@
 ## Config Files — README
 
-This directory contains committed OpenClaw configuration files. **No secrets live here.** All sensitive values are injected at runtime via environment variables defined in `.env` (which is gitignored).
+This directory contains OpenClaw configuration. No secrets live here.
 
-### Files
+| File | Committed? | Purpose |
+|------|-----------|---------|
+| `openclaw.example.json` | ✅ yes | Public template — no personal data |
+| `openclaw.json` | ❌ gitignored | Your live config — add your user IDs here |
 
-| File | Purpose |
-|------|---------|
-| `openclaw.json` | OpenClaw gateway hardened config — committed, no secrets |
+### First-time setup
+
+`scripts/install.sh` creates `config/openclaw.json` from the example automatically. Or do it manually:
+
+```bash
+cp config/openclaw.example.json config/openclaw.json
+# then edit: add your Telegram user ID to allowFrom, etc.
+```
 
 ### How Config is Loaded
 
-OpenClaw reads `~/.openclaw/openclaw.json` (inside the container: `/home/node/.openclaw/openclaw.json`). This file is bind-mounted from `OPENCLAW_CONFIG_DIR` on the host.
-
-**To apply config changes:**
-
-```bash
-# Copy config to the openclaw config directory
-cp config/openclaw.json ${OPENCLAW_CONFIG_DIR:-~/.openclaw}/openclaw.json
-
-# Restart the OpenShell sandbox to pick up changes
-scripts/stop.sh
-scripts/start.sh
-```
-
-Or use `scripts/start.sh` which does this automatically.
+`scripts/start.sh` syncs `config/openclaw.json` into the running sandbox before the gateway starts. Any change to this file takes effect on the next `bash scripts/stop.sh && bash scripts/start.sh`.
 
 ### Adding Channels
 
-Edit `openclaw.json` to uncomment and configure the channel blocks (Telegram, Discord, WhatsApp). Then add the bot token to `.env`. Never put tokens directly in this file.
+Edit `config/openclaw.json` to enable channel blocks (Telegram, Discord, WhatsApp). Add bot tokens to `.env`. Never put tokens in the config file.
 
 ### Rollback
 
-Because `openclaw.json` is committed to git, you can always roll back:
+The example file is version-controlled. To reset your live config to the template:
 
 ```bash
-git log --oneline config/openclaw.json   # see history
-git checkout <sha> -- config/openclaw.json  # restore a version
+cp config/openclaw.example.json config/openclaw.json
+# re-add your personal values, then restart
 ```

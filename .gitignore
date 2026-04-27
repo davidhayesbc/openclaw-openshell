@@ -1,5 +1,9 @@
 # --- Secrets & credentials (NEVER commit these) ---
 .env
+
+# Personal OpenClaw config (contains your Telegram/Discord user IDs etc.)
+# Copy config/openclaw.example.json -> config/openclaw.json and edit it.
+config/openclaw.json
 secrets/
 *.key
 *.pem

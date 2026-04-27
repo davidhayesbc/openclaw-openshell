@@ -75,14 +75,13 @@ chmod 700 "$OPENCLAW_WORKSPACE_DIR"
 log "Config dir:     $OPENCLAW_CONFIG_DIR"
 log "Workspace dir:  $OPENCLAW_WORKSPACE_DIR"
 
-# --- 4. Copy openclaw.json config template ---
-CONFIG_TARGET="$OPENCLAW_CONFIG_DIR/openclaw.json"
-if [[ ! -f "$CONFIG_TARGET" ]]; then
-  cp config/openclaw.json "$CONFIG_TARGET"
-  log "Copied config/openclaw.json -> $CONFIG_TARGET"
+# --- 4. Create config/openclaw.json from example if not present ---
+if [[ ! -f config/openclaw.json ]]; then
+  cp config/openclaw.example.json config/openclaw.json
+  log "Created config/openclaw.json from config/openclaw.example.json"
+  warn "Edit config/openclaw.json — add your Telegram/Discord user IDs etc."
 else
-  log "Config already exists at $CONFIG_TARGET (not overwriting)"
-  log "To update it: cp config/openclaw.json $CONFIG_TARGET"
+  log "config/openclaw.json already exists (not overwriting)"
 fi
 
 # --- 5. Set up .env ---
