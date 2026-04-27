@@ -49,6 +49,16 @@ SSH_CONFIG_FILE="/tmp/openclaw-ssh.conf"
 command -v openshell >/dev/null 2>&1 || die "OpenShell CLI not found. Run scripts/install.sh first."
 
 # ---------------------------------------------------------------------------
+# Validate Docker service is running
+# ---------------------------------------------------------------------------
+log "Checking Docker service..."
+if command -v docker >/dev/null 2>&1; then
+  docker info >/dev/null 2>&1 || die "Docker is installed but not running. Start the Docker service and retry."
+else
+  die "Docker not found. Install Docker and ensure the service is running before starting OpenClaw."
+fi
+
+# ---------------------------------------------------------------------------
 # Detect if sandbox is already running and healthy
 # ---------------------------------------------------------------------------
 SANDBOX_EXISTS=false
