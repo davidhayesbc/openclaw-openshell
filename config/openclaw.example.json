@@ -69,8 +69,28 @@
       "models": {
         "ollama/gemma4:e4b": { "alias": "gemma4" }
       }
-    }
+    },
+    // Add entries here for each additional agent you create.
+    // Each agent gets its own workspace, session history, and auth profiles.
+    // The first entry (or the one with "default": true) is the fallback agent.
+    // "list": [
+    //   { "id": "main",  "workspace": "~/.openclaw/workspace" },
+    //   { "id": "coder", "workspace": "~/.openclaw/workspace-coder" }
+    // ]
   },
+
+  // Bindings route inbound messages to specific agents.
+  // Most-specific match wins (peer > channel > fallback).
+  // Omit this block to send all traffic to the default agent.
+  // "bindings": [
+  //   {
+  //     "agentId": "coder",
+  //     "match": {
+  //       "channel": "telegram",
+  //       "peer": { "kind": "direct", "id": "YOUR_TELEGRAM_USER_ID" }
+  //     }
+  //   }
+  // ],
 
   "channels": {
     "telegram": {

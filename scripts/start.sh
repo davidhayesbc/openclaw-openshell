@@ -178,6 +178,40 @@ openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'cat > "$HOME/.openc
   < config/openclaw.json
 
 # ---------------------------------------------------------------------------
+# Step 5c: Sync agent workspace files into the sandbox
+#
+# Looks first in a sibling 'openclaw-agents' repo (../openclaw-agents/agents/),
+# then falls back to the local agents/ directory in this repo. Each agent's
+# workspace/ subfolder is tar-piped into ~/.openclaw/workspace-<agentId>
+# inside the sandbox, preserving file permissions and structure.
+# ---------------------------------------------------------------------------
+_AGENTS_REPO="${REPO_ROOT}/../openclaw-agents/agents"
+_AGENTS_LOCAL="${REPO_ROOT}/agents"
+if [[ -d "${_AGENTS_REPO}" ]]; then
+  _AGENTS_DIR="${_AGENTS_REPO}"
+  log "Agent workspaces: sibling repo ${_AGENTS_DIR}"
+elif [[ -d "${_AGENTS_LOCAL}" ]]; then
+  _AGENTS_DIR="${_AGENTS_LOCAL}"
+  log "Agent workspaces: local agents/ directory"
+else
+  _AGENTS_DIR=""
+fi
+
+if [[ -n "${_AGENTS_DIR}" ]]; then
+  for _agent_workspace in "${_AGENTS_DIR}"/*/workspace; do
+    [[ -d "${_agent_workspace}" ]] || continue
+    _agent_id="$(basename "$(dirname "${_agent_workspace}")")"
+    log "Syncing workspace for agent '${_agent_id}'..."
+    openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+      bash -lc "mkdir -p ~/.openclaw/workspace-${_agent_id}"
+    tar -C "${_agent_workspace}" -cf - . \
+      | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+          bash -lc "tar -C ~/.openclaw/workspace-${_agent_id} -xf -"
+    log "Agent '${_agent_id}' workspace → ~/.openclaw/workspace-${_agent_id}"
+  done
+fi
+
+# ---------------------------------------------------------------------------
 # Step 6: Set up SSH port forward (host → sandbox:18789)
 #
 # 'openshell sandbox create --forward' only maintains the tunnel while its
@@ -242,7 +276,7 @@ if [[ "${POLICY_FILE}" == "policies/base-policy.yaml" ]] \
   && command -v node >/dev/null 2>&1 \
   && node -e 'const fs=require("fs"); const cfg=JSON.parse(fs.readFileSync("config/openclaw.json","utf8")); process.exit(cfg?.channels?.telegram?.enabled ? 0 : 1)' >/dev/null 2>&1; then
   warn "Telegram is enabled in config/openclaw.json but base policy is active."
-  warn "If Telegram messages do not flow, set OPENSHELL_POLICY_FILE=policies/extended-policy.yaml and restart."
+  warn "If Telegram messages do not flow, export OPENSHELL_POLICY_FILE=policies/extended-policy.yaml and restart."
 fi
 
 # ---------------------------------------------------------------------------

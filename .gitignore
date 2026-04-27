@@ -10,6 +10,10 @@ secrets/
 *.p12
 *.pfx
 
+# Agent workspace files — managed in a separate private repo (davidhayesbc/agents)
+# See: https://github.com/davidhayesbc/agents
+agents/
+
 # OpenClaw runtime data (contains session data, credentials, tokens)
 openclaw-config/
 openclaw-workspace/
