@@ -174,21 +174,44 @@ openshell sandbox exec --name "${SANDBOX_NAME}" -- \
 # ---------------------------------------------------------------------------
 log "Syncing repo config into sandbox OpenClaw home..."
 openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'mkdir -p "$HOME/.openclaw"'
-openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'cat > "$HOME/.openclaw/openclaw.json"' \
-  < config/openclaw.json
+# Inject the gateway token from .env into the config before writing it to the
+# sandbox. config/openclaw.json sets auth.mode="token" but deliberately omits
+# the token value (it's a secret). We merge it here via node so the gateway
+# token matches what callers expect.
+node -e "
+  const fs=require('fs');
+  const cfg=JSON.parse(fs.readFileSync('config/openclaw.json','utf8'));
+  cfg.gateway = cfg.gateway || {};
+  cfg.gateway.auth = cfg.gateway.auth || {};
+  cfg.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
+  process.stdout.write(JSON.stringify(cfg,null,2));
+" \
+  | openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'cat > "$HOME/.openclaw/openclaw.json"'
 
 # ---------------------------------------------------------------------------
 # Step 5c: Sync agent workspace files into the sandbox
 #
-# Looks first in a sibling 'openclaw-agents' repo (../openclaw-agents/agents/),
-# then falls back to the local agents/ directory in this repo. Each agent's
-# workspace/ subfolder is tar-piped into ~/.openclaw/workspace-<agentId>
-# inside the sandbox, preserving file permissions and structure.
+# Looks for agent workspaces in this order:
+#   1) OPENCLAW_AGENTS_DIR (explicit override)
+#   2) sibling 'openclaw-agents' repo (../openclaw-agents/agents/)
+#   3) sibling 'agents' repo (../agents/)
+#   4) local agents/ directory in this repo
+# Each agent's workspace/ subfolder is tar-piped into
+# ~/.openclaw/workspace-<agentId> inside the sandbox, preserving file
+# permissions and structure.
 # ---------------------------------------------------------------------------
+_AGENTS_OVERRIDE="${OPENCLAW_AGENTS_DIR:-}"
 _AGENTS_REPO="${REPO_ROOT}/../openclaw-agents/agents"
+_AGENTS_REPO_ALT="${REPO_ROOT}/../agents"
 _AGENTS_LOCAL="${REPO_ROOT}/agents"
-if [[ -d "${_AGENTS_REPO}" ]]; then
+if [[ -n "${_AGENTS_OVERRIDE}" ]]; then
+  _AGENTS_DIR="${_AGENTS_OVERRIDE}"
+  log "Agent workspaces: OPENCLAW_AGENTS_DIR=${_AGENTS_DIR}"
+elif [[ -d "${_AGENTS_REPO}" ]]; then
   _AGENTS_DIR="${_AGENTS_REPO}"
+  log "Agent workspaces: sibling repo ${_AGENTS_DIR}"
+elif [[ -d "${_AGENTS_REPO_ALT}" ]]; then
+  _AGENTS_DIR="${_AGENTS_REPO_ALT}"
   log "Agent workspaces: sibling repo ${_AGENTS_DIR}"
 elif [[ -d "${_AGENTS_LOCAL}" ]]; then
   _AGENTS_DIR="${_AGENTS_LOCAL}"
@@ -209,6 +232,8 @@ if [[ -n "${_AGENTS_DIR}" ]]; then
           bash -lc "tar -C ~/.openclaw/workspace-${_agent_id} -xf -"
     log "Agent '${_agent_id}' workspace → ~/.openclaw/workspace-${_agent_id}"
   done
+else
+  warn "No agent workspace source directory found; skipping agent workspace sync."
 fi
 
 # ---------------------------------------------------------------------------
