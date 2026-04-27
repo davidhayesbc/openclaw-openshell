@@ -212,6 +212,26 @@ if [[ -n "${_AGENTS_DIR}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Step 5d: Sync .agents skills directory into the sandbox
+#
+# The _openclaw-src/.agents folder contains skill definitions used by coding
+# agents. It is tar-piped into ~/.agents inside the sandbox so openclaw can
+# discover and use the skills at runtime.
+# ---------------------------------------------------------------------------
+_AGENTS_SKILLS_DIR="${REPO_ROOT}/_openclaw-src/.agents"
+if [[ -d "${_AGENTS_SKILLS_DIR}" ]]; then
+  log "Syncing .agents skills directory into sandbox ~/.agents..."
+  openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+    bash -lc "mkdir -p ~/.agents"
+  tar -C "${_AGENTS_SKILLS_DIR}" -cf - . \
+    | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+        bash -lc "tar -C ~/.agents -xf -"
+  log ".agents skills → ~/.agents"
+else
+  warn "_openclaw-src/.agents not found at ${_AGENTS_SKILLS_DIR}; skipping skills sync."
+fi
+
+# ---------------------------------------------------------------------------
 # Step 6: Set up SSH port forward (host → sandbox:18789)
 #
 # 'openshell sandbox create --forward' only maintains the tunnel while its
