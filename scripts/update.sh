@@ -65,7 +65,9 @@ update_openclaw() {
     git clone https://github.com/openclaw/openclaw.git _openclaw-src
   else
     log "Pulling latest openclaw/openclaw..."
-    git -C _openclaw-src pull --ff-only
+    git -C _openclaw-src fetch origin
+    git -C _openclaw-src checkout main 2>/dev/null || git -C _openclaw-src checkout -B main origin/main
+    git -C _openclaw-src reset --hard origin/main
   fi
 
   log "Rebuilding openclaw:local image..."
