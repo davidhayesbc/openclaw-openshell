@@ -73,8 +73,10 @@ elif [[ -n "${OPENAI_API_KEY:-}" ]]; then
   OPENCLAW_AUTH_CHOICE="openai-api-key"
 elif [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
   OPENCLAW_AUTH_CHOICE="openrouter-api-key"
+elif [[ -n "${OLLAMA_API_KEY:-}" ]]; then
+  OPENCLAW_AUTH_CHOICE="ollama"
 else
-  die "No LLM API key found in .env (ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY required)."
+  die "No LLM API key found in .env (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_API_KEY required)."
 fi
 
 # ---------------------------------------------------------------------------
@@ -215,7 +217,10 @@ log "Starting openclaw gateway (persistent exec session)..."
 GW_EXEC_LOG="/tmp/openclaw-gw-exec.log"
 nohup openshell sandbox exec \
   --name "${SANDBOX_NAME}" \
-  -- bash -c "NODE_OPTIONS='--require /tmp/patch-net.cjs' TELEGRAM_BOT_TOKEN='${TELEGRAM_BOT_TOKEN}' exec openclaw gateway run" \
+  -- env \
+    NODE_OPTIONS="--require /tmp/patch-net.cjs" \
+    TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
+    openclaw gateway run \
   > "${GW_EXEC_LOG}" 2>&1 &
 GW_EXEC_PID=$!
 echo "${GW_EXEC_PID}" > "${GW_EXEC_PID_FILE}"
@@ -224,14 +229,7 @@ log "Gateway exec PID ${GW_EXEC_PID} (log: ${GW_EXEC_LOG})"
 # ---------------------------------------------------------------------------
 # Step 8: Apply security policy (deny-all except LLM APIs)
 # ---------------------------------------------------------------------------
-POLICY_FILE="${OPENSHELL_POLICY_FILE:-}"
-if [[ -z "${POLICY_FILE}" ]]; then
-  POLICY_FILE="policies/base-policy.yaml"
-  if command -v node >/dev/null 2>&1 \
-    && node -e 'const fs=require("fs"); const cfg=JSON.parse(fs.readFileSync("config/openclaw.json","utf8")); process.exit(cfg?.channels?.telegram?.enabled ? 0 : 1)' >/dev/null 2>&1; then
-    POLICY_FILE="policies/extended-policy.yaml"
-  fi
-fi
+POLICY_FILE="${OPENSHELL_POLICY_FILE:-policies/base-policy.yaml}"
 
 log "Applying security policy from ${POLICY_FILE}..."
 openshell policy set "${SANDBOX_NAME}" \
@@ -239,6 +237,13 @@ openshell policy set "${SANDBOX_NAME}" \
   --wait \
 && log "Policy applied from ${POLICY_FILE}." \
 || warn "Policy apply failed. Run manually: openshell policy set ${SANDBOX_NAME} --policy ${POLICY_FILE} --wait"
+
+if [[ "${POLICY_FILE}" == "policies/base-policy.yaml" ]] \
+  && command -v node >/dev/null 2>&1 \
+  && node -e 'const fs=require("fs"); const cfg=JSON.parse(fs.readFileSync("config/openclaw.json","utf8")); process.exit(cfg?.channels?.telegram?.enabled ? 0 : 1)' >/dev/null 2>&1; then
+  warn "Telegram is enabled in config/openclaw.json but base policy is active."
+  warn "If Telegram messages do not flow, set OPENSHELL_POLICY_FILE=policies/extended-policy.yaml and restart."
+fi
 
 # ---------------------------------------------------------------------------
 # Step 9: Wait for gateway to become healthy

@@ -74,7 +74,7 @@
 
   "channels": {
     "telegram": {
-      "enabled": true,
+      "enabled": false,
       "dmPolicy": "pairing",
       // After pairing, add your numeric Telegram user ID here to allow
       // both DMs and group messages. Find it in: openclaw logs | grep from.id

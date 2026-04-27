@@ -6,8 +6,8 @@ These YAML files define [OpenShell sandbox policies](https://docs.nvidia.com/ope
 
 | File | Purpose |
 |------|---------|
-| `base-policy.yaml` | Minimal — only LLM API access (Anthropic, OpenAI, OpenRouter) |
-| `extended-policy.yaml` | Extended — adds GitHub read-only, npm, for dev tasks |
+| `base-policy.yaml` | Minimal — Anthropic/OpenAI/OpenRouter + local Ollama only |
+| `extended-policy.yaml` | Extended — base + Ollama Cloud + GitHub read-only + npm + Telegram |
 
 ### Policy Domains
 

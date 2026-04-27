@@ -88,6 +88,7 @@ fi
 log ""
 if [[ ! -f .env ]]; then
   cp .env.example .env
+  chmod 600 .env 2>/dev/null || true
   log "Created .env from .env.example — EDIT IT BEFORE STARTING"
   warn "Fill in your API keys and token in .env before running start.sh"
 else

@@ -27,18 +27,33 @@ OLD_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-}"
 NEW_TOKEN=$(openssl rand -hex 32)
 
 log "Generating new gateway token..."
-log "Old token (last 8 chars): ...${OLD_TOKEN: -8}"
-log "New token (last 8 chars): ...${NEW_TOKEN: -8}"
+if [[ -z "${OLD_TOKEN}" ]]; then
+  log "No existing gateway token was found in .env"
+else
+  log "Existing gateway token found in .env"
+fi
 echo ""
 read -r -p "[rotate] Apply new token and restart gateway? [y/N] " confirm
 [[ "$confirm" =~ ^[Yy]$ ]] || { log "Aborted."; exit 0; }
 
-# Update .env
-if grep -q "^OPENCLAW_GATEWAY_TOKEN=" .env; then
-  sed -i "s/^OPENCLAW_GATEWAY_TOKEN=.*/OPENCLAW_GATEWAY_TOKEN=${NEW_TOKEN}/" .env
-else
-  echo "OPENCLAW_GATEWAY_TOKEN=${NEW_TOKEN}" >> .env
-fi
+# Update .env (portable across GNU/BSD systems)
+TMP_ENV=$(mktemp)
+awk -v token="$NEW_TOKEN" '
+  BEGIN { updated=0 }
+  /^OPENCLAW_GATEWAY_TOKEN=/ {
+    print "OPENCLAW_GATEWAY_TOKEN=" token
+    updated=1
+    next
+  }
+  { print }
+  END {
+    if (!updated) {
+      print "OPENCLAW_GATEWAY_TOKEN=" token
+    }
+  }
+' .env > "$TMP_ENV"
+mv "$TMP_ENV" .env
+chmod 600 .env 2>/dev/null || true
 
 log "Token updated in .env"
 

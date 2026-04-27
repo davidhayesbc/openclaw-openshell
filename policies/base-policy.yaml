@@ -2,7 +2,8 @@
 # OpenShell Policy: Base (Minimal) — for OpenClaw Sandbox
 # =============================================================================
 # This is the starting point: maximum restriction.
-# Only allows outbound connections to Anthropic and OpenAI APIs.
+# Only allows outbound connections to Anthropic/OpenAI/OpenRouter APIs and
+# local Ollama on 127.0.0.1:11434.
 #
 # Apply with:
 #   openshell policy set ${OPENSHELL_SANDBOX_NAME:-openclaw} \
@@ -98,14 +99,3 @@ network_policies:
       - path: /usr/local/bin/node
       - path: /usr/bin/node
 
-  ollama_cloud_write:
-    name: ollama-cloud-write
-    endpoints:
-      - host: ollama.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
