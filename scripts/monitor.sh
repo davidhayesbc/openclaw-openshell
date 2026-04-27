@@ -28,6 +28,7 @@ fi
 
 SANDBOX_NAME="${OPENSHELL_SANDBOX_NAME:-openclaw}"
 GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
+GW_EXEC_LOG="/tmp/openclaw-gw-exec.log"
 
 case "$MODE" in
   --tui|-t)
@@ -44,6 +45,13 @@ case "$MODE" in
   --logs|-l)
     echo "[monitor] Tailing OpenClaw gateway logs (Ctrl+C to stop)..."
     echo ""
+    if [[ -f "${GW_EXEC_LOG}" ]]; then
+      echo "[monitor] Source: ${GW_EXEC_LOG}"
+      tail -f "${GW_EXEC_LOG}"
+      exit 0
+    fi
+
+    echo "[monitor] WARN: ${GW_EXEC_LOG} not found; falling back to OpenShell sandbox logs."
     if ! command -v openshell >/dev/null 2>&1; then
       echo "[monitor] ERROR: OpenShell not installed. Run scripts/install.sh first."
       exit 1

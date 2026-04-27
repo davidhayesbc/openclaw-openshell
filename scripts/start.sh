@@ -51,16 +51,18 @@ command -v openshell >/dev/null 2>&1 || die "OpenShell CLI not found. Run script
 # ---------------------------------------------------------------------------
 # Detect if sandbox is already running and healthy
 # ---------------------------------------------------------------------------
+SANDBOX_EXISTS=false
 if openshell sandbox list 2>/dev/null | grep -q "^${SANDBOX_NAME}"; then
+  SANDBOX_EXISTS=true
   log "Sandbox '${SANDBOX_NAME}' is already running."
-  log "Connect:  openshell sandbox connect ${SANDBOX_NAME}"
-  log "Monitor:  scripts/monitor.sh"
-  exit 0
+  log "Resuming gateway/bootstrap steps for the existing sandbox."
 fi
 
-log "Creating OpenClaw sandbox '${SANDBOX_NAME}' in OpenShell..."
-log "(This downloads the community sandbox image on first run)"
-log ""
+if [[ "${SANDBOX_EXISTS}" != true ]]; then
+  log "Creating OpenClaw sandbox '${SANDBOX_NAME}' in OpenShell..."
+  log "(This downloads the community sandbox image on first run)"
+  log ""
+fi
 
 # ---------------------------------------------------------------------------
 # Determine LLM provider (openclaw onboard --non-interactive needs --auth-choice)
@@ -84,10 +86,12 @@ fi
 # TUI spinner (which would cause SIGTSTP if backgrounded with a live terminal).
 # ---------------------------------------------------------------------------
 CREATE_LOG="/tmp/openclaw-create.log"
-openshell sandbox create \
-  --name "${SANDBOX_NAME}" \
-  --from openclaw \
-  > "${CREATE_LOG}" 2>&1 &
+if [[ "${SANDBOX_EXISTS}" != true ]]; then
+  openshell sandbox create \
+    --name "${SANDBOX_NAME}" \
+    --from openclaw \
+    > "${CREATE_LOG}" 2>&1 &
+fi
 
 # ---------------------------------------------------------------------------
 # Step 2: Wait for the pod to be Ready
@@ -160,6 +164,18 @@ openshell sandbox exec --name "${SANDBOX_NAME}" -- \
     --skip-skills
 
 # ---------------------------------------------------------------------------
+# Step 5b: Sync committed gateway config into the sandbox
+#
+# The onboard step seeds ~/.openclaw/openclaw.json inside the sandbox. We then
+# overwrite it with the repo-managed config so channel and model settings from
+# config/openclaw.json actually apply to the running gateway.
+# ---------------------------------------------------------------------------
+log "Syncing repo config into sandbox OpenClaw home..."
+openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'mkdir -p "$HOME/.openclaw"'
+openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'cat > "$HOME/.openclaw/openclaw.json"' \
+  < config/openclaw.json
+
+# ---------------------------------------------------------------------------
 # Step 6: Set up SSH port forward (host → sandbox:18789)
 #
 # 'openshell sandbox create --forward' only maintains the tunnel while its
@@ -199,7 +215,7 @@ log "Starting openclaw gateway (persistent exec session)..."
 GW_EXEC_LOG="/tmp/openclaw-gw-exec.log"
 nohup openshell sandbox exec \
   --name "${SANDBOX_NAME}" \
-  -- bash -c "NODE_OPTIONS='--require /tmp/patch-net.cjs' exec openclaw gateway run" \
+  -- bash -c "NODE_OPTIONS='--require /tmp/patch-net.cjs' TELEGRAM_BOT_TOKEN='${TELEGRAM_BOT_TOKEN}' exec openclaw gateway run" \
   > "${GW_EXEC_LOG}" 2>&1 &
 GW_EXEC_PID=$!
 echo "${GW_EXEC_PID}" > "${GW_EXEC_PID_FILE}"
@@ -208,12 +224,21 @@ log "Gateway exec PID ${GW_EXEC_PID} (log: ${GW_EXEC_LOG})"
 # ---------------------------------------------------------------------------
 # Step 8: Apply security policy (deny-all except LLM APIs)
 # ---------------------------------------------------------------------------
-log "Applying security policy..."
+POLICY_FILE="${OPENSHELL_POLICY_FILE:-}"
+if [[ -z "${POLICY_FILE}" ]]; then
+  POLICY_FILE="policies/base-policy.yaml"
+  if command -v node >/dev/null 2>&1 \
+    && node -e 'const fs=require("fs"); const cfg=JSON.parse(fs.readFileSync("config/openclaw.json","utf8")); process.exit(cfg?.channels?.telegram?.enabled ? 0 : 1)' >/dev/null 2>&1; then
+    POLICY_FILE="policies/extended-policy.yaml"
+  fi
+fi
+
+log "Applying security policy from ${POLICY_FILE}..."
 openshell policy set "${SANDBOX_NAME}" \
-  --policy "policies/base-policy.yaml" \
+  --policy "${POLICY_FILE}" \
   --wait \
-&& log "Base policy applied (all outbound blocked except configured LLM APIs)." \
-|| warn "Policy apply failed. Run manually: openshell policy set ${SANDBOX_NAME} --policy policies/base-policy.yaml --wait"
+&& log "Policy applied from ${POLICY_FILE}." \
+|| warn "Policy apply failed. Run manually: openshell policy set ${SANDBOX_NAME} --policy ${POLICY_FILE} --wait"
 
 # ---------------------------------------------------------------------------
 # Step 9: Wait for gateway to become healthy
