@@ -184,6 +184,11 @@ node -e "
   cfg.gateway = cfg.gateway || {};
   cfg.gateway.auth = cfg.gateway.auth || {};
   cfg.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
+  // Allow overriding Ollama endpoint per-machine (for sandbox network topology).
+  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL;
+  if (ollamaBaseUrl && cfg?.models?.providers?.ollama) {
+    cfg.models.providers.ollama.baseUrl = ollamaBaseUrl;
+  }
   process.stdout.write(JSON.stringify(cfg,null,2));
 " \
   | openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'cat > "$HOME/.openclaw/openclaw.json"'

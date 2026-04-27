@@ -87,6 +87,21 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-write
+      - host: host.docker.internal
+        port: 11434
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: gateway.docker.internal
+        port: 11434
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: 172.17.0.1
+        port: 11434
+        protocol: rest
+        enforcement: enforce
+        access: read-write
     binaries:
       - path: /usr/local/bin/node
       - path: /usr/bin/node
