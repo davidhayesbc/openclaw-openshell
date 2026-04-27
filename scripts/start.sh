@@ -75,7 +75,7 @@ docker image inspect openclaw:local >/dev/null 2>&1 \
 log "Checking OpenShell gateway..."
 if ! openshell gateway info >/dev/null 2>&1; then
   warn "OpenShell gateway is not reachable. Attempting to start it..."
-  openshell gateway start > /tmp/openclaw-gateway-start.log 2>&1 \
+  openshell gateway start 2>&1 | tee /tmp/openclaw-gateway-start.log \
     || die "OpenShell gateway failed to start. See /tmp/openclaw-gateway-start.log"
 fi
 
@@ -90,8 +90,8 @@ done
 
 if [[ "${GATEWAY_REACHABLE}" != true ]]; then
   warn "OpenShell gateway still unreachable. Recreating gateway..."
-  openshell gateway destroy --name openshell > /tmp/openclaw-gateway-recover.log 2>&1 || true
-  openshell gateway start >> /tmp/openclaw-gateway-recover.log 2>&1 \
+  openshell gateway destroy --name openshell 2>&1 | tee /tmp/openclaw-gateway-recover.log || true
+  openshell gateway start 2>&1 | tee -a /tmp/openclaw-gateway-recover.log \
     || die "OpenShell gateway recovery failed. See /tmp/openclaw-gateway-recover.log"
 
   for i in $(seq 1 30); do
@@ -117,8 +117,7 @@ fi
 
 if [[ "${SANDBOX_EXISTS}" != true ]]; then
   log "Creating OpenClaw sandbox '${SANDBOX_NAME}' in OpenShell..."
-  log "(This downloads the community sandbox image on first run)"
-  log ""
+  log "(This may take several minutes while the image is pulled — output below)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -151,7 +150,8 @@ if [[ "${SANDBOX_EXISTS}" != true ]]; then
     if openshell sandbox create \
       --name "${SANDBOX_NAME}" \
       --from openclaw \
-      > "${CREATE_LOG}" 2>&1; then
+      </dev/null \
+      2>&1 | tee "${CREATE_LOG}"; then
       CREATE_OK=true
       break
     fi
@@ -159,7 +159,7 @@ if [[ "${SANDBOX_EXISTS}" != true ]]; then
     warn "Sandbox create attempt ${attempt}/3 failed."
     if grep -qiE "Gateway .*not reachable|transport error|tls handshake|Connection reset|Connection refused" "${CREATE_LOG}"; then
       warn "Detected gateway connectivity error; restarting OpenShell gateway and retrying..."
-      openshell gateway start > /tmp/openclaw-gateway-start.log 2>&1 || true
+      openshell gateway start 2>&1 | tee /tmp/openclaw-gateway-start.log || true
     fi
     sleep 2
   done
