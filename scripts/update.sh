@@ -43,8 +43,10 @@ upgrade_sandboxes() {
 
 fresh_onboard() {
   ensure_nemoclaw_cli
+  prepare_onboard_environment
   warn "Starting fresh onboarding. Any resumable onboarding session will be discarded."
-  nemoclaw onboard --fresh
+  # shellcheck disable=SC2046
+  nemoclaw onboard --fresh $(build_onboard_flags_from_env)
 }
 
 case "$MODE" in

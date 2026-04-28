@@ -124,3 +124,49 @@ ensure_nemoclaw_cli() {
     is_real_nemoclaw_cli "$(command -v nemoclaw)" || die "NemoClaw is still not runnable after repair."
   fi
 }
+
+prepare_onboard_environment() {
+  # Forward optional messaging tokens from .env to nemoclaw onboard.
+  [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && export TELEGRAM_BOT_TOKEN
+  [[ -n "${TELEGRAM_ALLOWED_IDS:-}" ]] && export TELEGRAM_ALLOWED_IDS
+  [[ -n "${DISCORD_BOT_TOKEN:-}" ]] && export DISCORD_BOT_TOKEN
+
+  # Forward inference provider vars.
+  # COMPATIBLE_API_KEY selects the "Other OpenAI-compatible" provider.
+  if [[ -z "${COMPATIBLE_API_KEY:-}" && -n "${OPENROUTER_API_KEY:-}" ]]; then
+    export COMPATIBLE_API_KEY="${OPENROUTER_API_KEY}"
+  fi
+
+  # Bridge old/new env names used by NemoClaw onboarding.
+  if [[ -z "${NEMOCLAW_ENDPOINT_URL:-}" && -n "${NEMOCLAW_INFERENCE_BASE_URL:-}" ]]; then
+    export NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_INFERENCE_BASE_URL}"
+  fi
+  if [[ -z "${NEMOCLAW_INFERENCE_BASE_URL:-}" && -n "${NEMOCLAW_ENDPOINT_URL:-}" ]]; then
+    export NEMOCLAW_INFERENCE_BASE_URL="${NEMOCLAW_ENDPOINT_URL}"
+  fi
+
+  # Sensible non-interactive defaults for OpenRouter-compatible setup.
+  if [[ -n "${COMPATIBLE_API_KEY:-}" ]]; then
+    [[ -n "${NEMOCLAW_ENDPOINT_URL:-}" ]] || export NEMOCLAW_ENDPOINT_URL="https://openrouter.ai/api/v1"
+    [[ -n "${NEMOCLAW_INFERENCE_BASE_URL:-}" ]] || export NEMOCLAW_INFERENCE_BASE_URL="${NEMOCLAW_ENDPOINT_URL}"
+    [[ -n "${NEMOCLAW_MODEL:-}" ]] || export NEMOCLAW_MODEL="openai/gpt-oss-20b:free"
+    [[ -n "${NEMOCLAW_PROVIDER:-}" ]] || export NEMOCLAW_PROVIDER="custom"
+  fi
+
+  [[ -n "${COMPATIBLE_API_KEY:-}" ]] && export COMPATIBLE_API_KEY
+  [[ -n "${NEMOCLAW_ENDPOINT_URL:-}" ]] && export NEMOCLAW_ENDPOINT_URL
+  [[ -n "${NEMOCLAW_INFERENCE_BASE_URL:-}" ]] && export NEMOCLAW_INFERENCE_BASE_URL
+  [[ -n "${NEMOCLAW_MODEL:-}" ]] && export NEMOCLAW_MODEL
+  [[ -n "${NEMOCLAW_PROVIDER:-}" ]] && export NEMOCLAW_PROVIDER
+  [[ -n "${NVIDIA_API_KEY:-}" ]] && export NVIDIA_API_KEY
+  [[ -n "${OPENAI_API_KEY:-}" ]] && export OPENAI_API_KEY
+  [[ -n "${ANTHROPIC_API_KEY:-}" ]] && export ANTHROPIC_API_KEY
+  [[ -n "${OLLAMA_BASE_URL:-}" ]] && export OLLAMA_BASE_URL
+}
+
+build_onboard_flags_from_env() {
+  local flags=()
+  [[ "${NEMOCLAW_NON_INTERACTIVE:-}" == "1" ]] && flags+=("--non-interactive")
+  [[ "${NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE:-}" == "1" ]] && flags+=("--yes-i-accept-third-party-software")
+  echo "${flags[@]:-}"
+}

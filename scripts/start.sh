@@ -19,22 +19,14 @@ cd "$REPO_ROOT"
 log()  { echo "[start] $*"; }
 die()  { echo "[start] ERROR: $*" >&2; exit 1; }
 
-load_env() {
-  local env_file="$1"
-  [[ -f "$env_file" ]] || return 0
-  # Strip CRLF line endings so .env works in WSL/bash.
-  set -o allexport
-  # shellcheck disable=SC1090
-  source <(sed 's/\r$//' "$env_file")
-  set +o allexport
-}
+source "${REPO_ROOT}/scripts/lib/nemoclaw-cli.sh"
 
-load_env .env
+load_env_file .env
 
 SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-openclaw}"
 MODE="${1:-}"
 
-command -v nemoclaw >/dev/null 2>&1 || die "NemoClaw not installed. Run scripts/install.sh first."
+ensure_nemoclaw_cli
 command -v docker   >/dev/null 2>&1 || die "Docker not found."
 docker info >/dev/null 2>&1         || die "Docker is not running. Start Docker and retry."
 
@@ -59,38 +51,13 @@ sync_agent_workspaces() {
 }
 sync_agent_workspaces
 
-# Forward optional messaging tokens from .env to nemoclaw onboard
-[[ -n "${TELEGRAM_BOT_TOKEN:-}"   ]] && export TELEGRAM_BOT_TOKEN
-[[ -n "${TELEGRAM_ALLOWED_IDS:-}" ]] && export TELEGRAM_ALLOWED_IDS
-[[ -n "${DISCORD_BOT_TOKEN:-}"    ]] && export DISCORD_BOT_TOKEN
-
-# Forward inference provider vars.
-# COMPATIBLE_API_KEY selects the "Other OpenAI-compatible" provider (e.g. OpenRouter).
-# If not set but OPENROUTER_API_KEY is, derive it automatically.
-if [[ -z "${COMPATIBLE_API_KEY:-}" && -n "${OPENROUTER_API_KEY:-}" ]]; then
-  export COMPATIBLE_API_KEY="${OPENROUTER_API_KEY}"
-fi
-[[ -n "${COMPATIBLE_API_KEY:-}"          ]] && export COMPATIBLE_API_KEY
-[[ -n "${NEMOCLAW_INFERENCE_BASE_URL:-}" ]] && export NEMOCLAW_INFERENCE_BASE_URL
-[[ -n "${NEMOCLAW_MODEL:-}"              ]] && export NEMOCLAW_MODEL
-[[ -n "${NVIDIA_API_KEY:-}"              ]] && export NVIDIA_API_KEY
-[[ -n "${OPENAI_API_KEY:-}"              ]] && export OPENAI_API_KEY
-[[ -n "${ANTHROPIC_API_KEY:-}"           ]] && export ANTHROPIC_API_KEY
-[[ -n "${OLLAMA_BASE_URL:-}"             ]] && export OLLAMA_BASE_URL
-
-# Build onboard flags from env vars so .env can drive a non-interactive run.
-build_onboard_flags() {
-  local flags=()
-  [[ "${NEMOCLAW_NON_INTERACTIVE:-}" == "1" ]] && flags+=("--non-interactive")
-  [[ "${NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE:-}" == "1" ]] && flags+=("--yes-i-accept-third-party-software")
-  echo "${flags[@]:-}"
-}
+prepare_onboard_environment
 
 case "$MODE" in
   --onboard)
     log "Launching NemoClaw onboard wizard..."
     # shellcheck disable=SC2046
-    nemoclaw onboard $(build_onboard_flags)
+    nemoclaw onboard $(build_onboard_flags_from_env)
     ;;
   --connect)
     log "Connecting to sandbox '${SANDBOX_NAME}'..."
@@ -111,7 +78,7 @@ case "$MODE" in
         log ""
       fi
       # shellcheck disable=SC2046
-      nemoclaw onboard $(build_onboard_flags)
+      nemoclaw onboard $(build_onboard_flags_from_env)
     fi
     ;;
 esac
