@@ -19,9 +19,17 @@ cd "$REPO_ROOT"
 log()  { echo "[start] $*"; }
 die()  { echo "[start] ERROR: $*" >&2; exit 1; }
 
-if [[ -f .env ]]; then
-  set -o allexport; source .env; set +o allexport
-fi
+load_env() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+  # Strip CRLF line endings so .env works in WSL/bash.
+  set -o allexport
+  # shellcheck disable=SC1090
+  source <(sed 's/\r$//' "$env_file")
+  set +o allexport
+}
+
+load_env .env
 
 SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-openclaw}"
 MODE="${1:-}"
