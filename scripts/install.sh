@@ -22,6 +22,10 @@ log()  { echo "[install] $*"; }
 warn() { echo "[install] WARN: $*" >&2; }
 die()  { echo "[install] ERROR: $*" >&2; exit 1; }
 
+source "${REPO_ROOT}/scripts/lib/nemoclaw-cli.sh"
+
+load_env_file .env
+
 # --- 1. Check prerequisites ---
 log "Checking prerequisites..."
 command -v docker >/dev/null 2>&1 || die "Docker is not installed. Install Docker Desktop or Docker Engine first."
@@ -29,35 +33,32 @@ docker info >/dev/null 2>&1        || die "Docker daemon is not running. Start D
 log "Docker: $(docker --version)"
 
 # --- 2. Install NemoClaw ---
-if command -v nemoclaw >/dev/null 2>&1; then
+if command -v nemoclaw >/dev/null 2>&1 && is_real_nemoclaw_cli "$(command -v nemoclaw)"; then
   log "NemoClaw already installed: $(nemoclaw --version 2>/dev/null || echo 'installed')"
   log "To upgrade, run: scripts/update.sh"
 else
+  if command -v nemoclaw >/dev/null 2>&1; then
+    warn "Found an invalid/non-NemoClaw 'nemoclaw' binary on PATH. Repairing..."
+    repair_nemoclaw_cli
+  fi
+
   log ""
   log "Installing NemoClaw via official installer..."
-  log "Installs Node.js (via nvm) and nemoclaw into user-local directories. No sudo required."
+  log "Installs Node.js (via nvm) and prepares NemoClaw dependencies. No sudo required."
   log ""
   curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
-  # Re-source nvm so nemoclaw is findable in this session
-  if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
-    # shellcheck source=/dev/null
-    source "$HOME/.nvm/nvm.sh"
-  fi
-  if command -v nemoclaw >/dev/null 2>&1; then
+  # Ensure the runnable CLI is the real NemoClaw binary.
+  if command -v nemoclaw >/dev/null 2>&1 && is_real_nemoclaw_cli "$(command -v nemoclaw)"; then
     log "NemoClaw installed: $(nemoclaw --version 2>/dev/null || echo 'ok')"
   else
-    log ""
-    log "Installation complete. If 'nemoclaw' is not found, reload your shell:"
-    log "  source ~/.bashrc    (bash)"
-    log "  source ~/.zshrc     (zsh)"
+    warn "Installer did not leave a runnable NemoClaw CLI in this shell. Repairing from GitHub source..."
+    repair_nemoclaw_cli
+    log "NemoClaw installed: $(nemoclaw --version 2>/dev/null || echo 'ok')"
   fi
 fi
 
 # --- 3. Seed ~/.openclaw/openclaw.json from repo config ---
 # NemoClaw snapshots this during 'nemoclaw onboard' as the base agent config.
-if [[ -f .env ]]; then
-  set -o allexport; source .env 2>/dev/null || true; set +o allexport
-fi
 OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
 mkdir -p "$OPENCLAW_CONFIG_DIR"
 chmod 700 "$OPENCLAW_CONFIG_DIR"
