@@ -87,21 +87,22 @@ curl -L https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_l
 
 ### OpenShell Policy (Primary Security Layer)
 
-Network access in the OpenShell sandbox is **deny-by-default**. Only policies you explicitly allow go through.
+Network access in the OpenShell sandbox is **deny-by-default**. Under NemoClaw, policy is managed via tiers and presets.
 
-**Start with `base-policy.yaml`**. Only open the minimum needed.
+Start with the `restricted` tier and only add the minimum presets needed.
 
 ```bash
-# View active policy
-openshell policy get openclaw
+# View active presets
+nemoclaw openclaw policy-list
 
-# Apply minimal policy (LLM APIs only)
-openshell policy set openclaw --policy policies/base-policy.yaml --wait
+# Add only the presets needed for a task
+nemoclaw openclaw policy-add github
+nemoclaw openclaw policy-add npm
 
-# Apply extended policy only when needed, revert after
-openshell policy set openclaw --policy policies/extended-policy.yaml --wait
+# Remove temporary access after the task
+nemoclaw openclaw policy-remove npm
 # ... do the task ...
-openshell policy set openclaw --policy policies/base-policy.yaml --wait
+nemoclaw openclaw policy-remove github
 ```
 
 All policy changes are logged. To review:

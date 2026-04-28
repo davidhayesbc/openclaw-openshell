@@ -7,10 +7,10 @@ title = "openclaw-openshell gitleaks config"
   useDefault = true
 
 [[rules]]
-  id = "openclaw-gateway-token"
-  description = "OpenClaw Gateway Token"
-  regex = '''OPENCLAW_GATEWAY_TOKEN\s*=\s*['"']?[A-Za-z0-9_\-]{16,}['"']?'''
-  tags = ["openclaw", "token"]
+  id = "gateway-token-env"
+  description = "Gateway Token Environment Variable"
+  regex = '''(OPENCLAW_GATEWAY_TOKEN|NEMOCLAW_GATEWAY_TOKEN)\s*=\s*['"']?[A-Za-z0-9_\-]{16,}['"']?'''
+  tags = ["gateway", "token"]
 
 [[rules]]
   id = "anthropic-api-key"

@@ -32,8 +32,7 @@
 #   docker compose up -d
 #
 # To build the image first (required before first run):
-#   git clone https://github.com/openclaw/openclaw.git _openclaw-src
-#   cd _openclaw-src && docker build -t openclaw:local . && cd ..
+#   docker build -t openclaw:local -f Dockerfile .
 # =============================================================================
 
 networks:
