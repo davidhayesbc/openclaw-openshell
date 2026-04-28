@@ -64,6 +64,19 @@ sync_agent_workspaces
 [[ -n "${TELEGRAM_ALLOWED_IDS:-}" ]] && export TELEGRAM_ALLOWED_IDS
 [[ -n "${DISCORD_BOT_TOKEN:-}"    ]] && export DISCORD_BOT_TOKEN
 
+# Forward inference provider vars.
+# COMPATIBLE_API_KEY selects the "Other OpenAI-compatible" provider (e.g. OpenRouter).
+# If not set but OPENROUTER_API_KEY is, derive it automatically.
+if [[ -z "${COMPATIBLE_API_KEY:-}" && -n "${OPENROUTER_API_KEY:-}" ]]; then
+  export COMPATIBLE_API_KEY="${OPENROUTER_API_KEY}"
+fi
+[[ -n "${COMPATIBLE_API_KEY:-}"          ]] && export COMPATIBLE_API_KEY
+[[ -n "${NEMOCLAW_INFERENCE_BASE_URL:-}" ]] && export NEMOCLAW_INFERENCE_BASE_URL
+[[ -n "${NEMOCLAW_MODEL:-}"              ]] && export NEMOCLAW_MODEL
+[[ -n "${NVIDIA_API_KEY:-}"              ]] && export NVIDIA_API_KEY
+[[ -n "${OPENAI_API_KEY:-}"              ]] && export OPENAI_API_KEY
+[[ -n "${ANTHROPIC_API_KEY:-}"           ]] && export ANTHROPIC_API_KEY
+
 # Build onboard flags from env vars so .env can drive a non-interactive run.
 build_onboard_flags() {
   local flags=()
