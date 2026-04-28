@@ -28,11 +28,24 @@ load_env() {
 }
 
 repair_nemoclaw() {
-  warn "NemoClaw command is installed but not runnable. Attempting repair..."
-  curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
+  warn "NemoClaw shim is stale or broken. Relinking without re-onboarding..."
+  # Re-source nvm so the current node version is on PATH
   if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
     # shellcheck source=/dev/null
     source "$HOME/.nvm/nvm.sh"
+  fi
+  # Reinstall the package under the current node version
+  npm install -g nemoclaw@latest
+  # Regenerate the ~/.local/bin/nemoclaw shim to point at the new npm bin dir.
+  # The old shim hardcodes a nvm node version path that may no longer exist.
+  local npm_bin
+  npm_bin="$(npm prefix -g)/bin"
+  if [[ -f "$npm_bin/nemoclaw" ]]; then
+    mkdir -p "$HOME/.local/bin"
+    printf '#!/usr/bin/env bash\nexec "%s/nemoclaw" "$@"\n' "$npm_bin" \
+      > "$HOME/.local/bin/nemoclaw"
+    chmod +x "$HOME/.local/bin/nemoclaw"
+    log "Shim relinked: ~/.local/bin/nemoclaw -> $npm_bin/nemoclaw"
   fi
   hash -r
 }
