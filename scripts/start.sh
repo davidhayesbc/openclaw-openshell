@@ -64,10 +64,19 @@ sync_agent_workspaces
 [[ -n "${TELEGRAM_ALLOWED_IDS:-}" ]] && export TELEGRAM_ALLOWED_IDS
 [[ -n "${DISCORD_BOT_TOKEN:-}"    ]] && export DISCORD_BOT_TOKEN
 
+# Build onboard flags from env vars so .env can drive a non-interactive run.
+build_onboard_flags() {
+  local flags=()
+  [[ "${NEMOCLAW_NON_INTERACTIVE:-}" == "1" ]] && flags+=("--non-interactive")
+  [[ "${NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE:-}" == "1" ]] && flags+=("--yes-i-accept-third-party-software")
+  echo "${flags[@]:-}"
+}
+
 case "$MODE" in
   --onboard)
     log "Launching NemoClaw onboard wizard..."
-    nemoclaw onboard
+    # shellcheck disable=SC2046
+    nemoclaw onboard $(build_onboard_flags)
     ;;
   --connect)
     log "Connecting to sandbox '${SANDBOX_NAME}'..."
@@ -79,11 +88,16 @@ case "$MODE" in
       log "Sandbox '${SANDBOX_NAME}' found. Connecting..."
       nemoclaw "${SANDBOX_NAME}" connect
     else
-      log "No sandbox found. Launching NemoClaw onboard wizard..."
-      log "The wizard will prompt for inference provider, model, policy tier,"
-      log "and optional messaging channels (Telegram, Discord, Slack)."
-      log ""
-      nemoclaw onboard
+      if [[ "${NEMOCLAW_NON_INTERACTIVE:-}" == "1" ]]; then
+        log "No sandbox found. Starting non-interactive onboard (driven by .env)..."
+      else
+        log "No sandbox found. Launching NemoClaw onboard wizard..."
+        log "The wizard will prompt for inference provider, model, policy tier,"
+        log "and optional messaging channels (Telegram, Discord, Slack)."
+        log ""
+      fi
+      # shellcheck disable=SC2046
+      nemoclaw onboard $(build_onboard_flags)
     fi
     ;;
 esac
