@@ -38,6 +38,27 @@ command -v nemoclaw >/dev/null 2>&1 || die "NemoClaw not installed. Run scripts/
 command -v docker   >/dev/null 2>&1 || die "Docker not found."
 docker info >/dev/null 2>&1         || die "Docker is not running. Start Docker and retry."
 
+# Sync agent workspace files from OPENCLAW_AGENTS_DIR each run so edits
+# to identity/soul/tools files are picked up without re-onboarding.
+sync_agent_workspaces() {
+  local agents_dir="${OPENCLAW_AGENTS_DIR:-}"
+  [[ -n "$agents_dir" && -d "$agents_dir" ]] || return 0
+  local config_dir="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
+  for agent_dir in "$agents_dir"/*/; do
+    local agent_id
+    agent_id="$(basename "$agent_dir")"
+    local src="${agent_dir}workspace"
+    local dst="${config_dir}/workspace-${agent_id}"
+    if [[ -d "$src" ]]; then
+      mkdir -p "$dst"
+      rsync -a --delete "$src/" "$dst/" 2>/dev/null \
+        || cp -r "$src"/* "$dst/"
+      log "Synced agent '${agent_id}' workspace -> ${dst}"
+    fi
+  done
+}
+sync_agent_workspaces
+
 # Forward optional messaging tokens from .env to nemoclaw onboard
 [[ -n "${TELEGRAM_BOT_TOKEN:-}"   ]] && export TELEGRAM_BOT_TOKEN
 [[ -n "${TELEGRAM_ALLOWED_IDS:-}" ]] && export TELEGRAM_ALLOWED_IDS

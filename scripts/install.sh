@@ -72,7 +72,30 @@ if [[ -f config/openclaw.json ]]; then
   fi
 fi
 
-# --- 4. Set up .env ---
+# --- 4. Seed agent workspaces ---
+# If OPENCLAW_AGENTS_DIR is set, copy each <dir>/<agent-id>/workspace/ into
+# ~/.openclaw/workspace-<agent-id>/ so NemoClaw snapshots the right files.
+# The coder agent workspace (IDENTITY.md, SOUL.md, etc.) must exist before onboard.
+seed_agent_workspaces() {
+  local agents_dir="${OPENCLAW_AGENTS_DIR:-}"
+  [[ -n "$agents_dir" && -d "$agents_dir" ]] || return 0
+  local config_dir="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
+  log "Seeding agent workspaces from ${agents_dir}..."
+  for agent_dir in "$agents_dir"/*/; do
+    local agent_id
+    agent_id="$(basename "$agent_dir")"
+    local src="${agent_dir}workspace"
+    local dst="${config_dir}/workspace-${agent_id}"
+    if [[ -d "$src" ]]; then
+      mkdir -p "$dst"
+      cp -r "$src"/* "$dst/"
+      log "  Seeded agent '${agent_id}': ${src} -> ${dst}"
+    fi
+  done
+}
+seed_agent_workspaces
+
+# --- 5. Set up .env ---
 if [[ ! -f .env ]]; then
   cp .env.example .env
   chmod 600 .env 2>/dev/null || true
