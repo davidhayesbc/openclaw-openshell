@@ -76,6 +76,7 @@ fi
 [[ -n "${NVIDIA_API_KEY:-}"              ]] && export NVIDIA_API_KEY
 [[ -n "${OPENAI_API_KEY:-}"              ]] && export OPENAI_API_KEY
 [[ -n "${ANTHROPIC_API_KEY:-}"           ]] && export ANTHROPIC_API_KEY
+[[ -n "${OLLAMA_BASE_URL:-}"             ]] && export OLLAMA_BASE_URL
 
 # Build onboard flags from env vars so .env can drive a non-interactive run.
 build_onboard_flags() {
