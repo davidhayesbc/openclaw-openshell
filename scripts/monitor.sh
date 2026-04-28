@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
-# monitor.sh — Unified monitoring dashboard for OpenClaw + OpenShell
+# monitor.sh -- Monitor OpenClaw sandbox activity via NemoClaw
 # =============================================================================
-# Launches multiple views depending on what's running:
-#   - openshell term  (TUI dashboard — gateways, sandboxes, providers)
-#   - docker stats    (resource usage)
-#   - live logs
-#
 # Usage:
-#   scripts/monitor.sh             # OpenShell TUI (default)
-#   scripts/monitor.sh --logs      # Tail gateway logs
-#   scripts/monitor.sh --stats     # Docker resource stats
-#   scripts/monitor.sh --status    # Quick status snapshot (non-interactive)
+#   scripts/monitor.sh             # OpenShell TUI (live dashboard, default)
+#   scripts/monitor.sh --status    # Status snapshot for all sandboxes
+#   scripts/monitor.sh --logs      # Stream sandbox logs
+#   scripts/monitor.sh --policy    # Show active network policy presets
+#   scripts/monitor.sh --debug     # Collect diagnostics tarball
 # =============================================================================
 set -euo pipefail
 
@@ -21,95 +17,50 @@ cd "$REPO_ROOT"
 MODE="${1:---tui}"
 
 if [[ -f .env ]]; then
-  set -o allexport
-  source .env 2>/dev/null || true
-  set +o allexport
+  set -o allexport; source .env 2>/dev/null || true; set +o allexport
 fi
 
-SANDBOX_NAME="${OPENSHELL_SANDBOX_NAME:-openclaw}"
-GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
-GW_EXEC_LOG="/tmp/openclaw-gw-exec.log"
+SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-openclaw}"
+
+command -v nemoclaw >/dev/null 2>&1 || { echo "[monitor] ERROR: NemoClaw not installed."; exit 1; }
 
 case "$MODE" in
   --tui|-t)
-    if ! command -v openshell >/dev/null 2>&1; then
-      echo "[monitor] ERROR: OpenShell not installed. Run scripts/install.sh first."
-      exit 1
-    fi
     echo "[monitor] Launching OpenShell TUI (press q to quit)..."
-    echo "  Tab = switch panels  |  j/k = navigate  |  Enter = select  |  : = command"
+    echo "  Tab = switch panels  |  j/k = navigate  |  Enter = select"
+    echo "  Blocked network requests appear here for interactive approval."
     echo ""
     openshell term
     ;;
-
-  --logs|-l)
-    echo "[monitor] Tailing OpenClaw gateway logs (Ctrl+C to stop)..."
-    echo ""
-    if [[ -f "${GW_EXEC_LOG}" ]]; then
-      echo "[monitor] Source: ${GW_EXEC_LOG}"
-      tail -f "${GW_EXEC_LOG}"
-      exit 0
-    fi
-
-    echo "[monitor] WARN: ${GW_EXEC_LOG} not found; falling back to OpenShell sandbox logs."
-    if ! command -v openshell >/dev/null 2>&1; then
-      echo "[monitor] ERROR: OpenShell not installed. Run scripts/install.sh first."
-      exit 1
-    fi
-    if ! openshell sandbox list 2>/dev/null | grep -q "^${SANDBOX_NAME}"; then
-      echo "[monitor] ERROR: Sandbox '${SANDBOX_NAME}' is not running. Start it with scripts/start.sh."
-      exit 1
-    fi
-    openshell logs "${SANDBOX_NAME}" --tail
-    ;;
-
-  --stats|-s)
-    echo "[monitor] Docker resource usage (Ctrl+C to stop)..."
-    docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}"
-    ;;
-
   --status)
     echo "================================================================"
-    echo "OpenClaw + OpenShell — Status Snapshot"
+    echo "NemoClaw + OpenClaw -- Status Snapshot"
     echo "$(date)"
     echo "================================================================"
     echo ""
-
-    echo "--- OpenShell ---"
-    if command -v openshell >/dev/null 2>&1; then
-      openshell status 2>/dev/null || echo "(gateway not running)"
-      echo ""
-      echo "Sandboxes:"
-      openshell sandbox list 2>/dev/null || echo "(none)"
-    else
-      echo "OpenShell not installed"
-    fi
-
+    echo "--- All sandboxes ---"
+    nemoclaw list
     echo ""
-    echo "--- Docker ---"
-    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "(docker not running)"
-
-    echo ""
-    echo "--- Health Check ---"
-    if curl -fsS "http://127.0.0.1:${GATEWAY_PORT}/healthz" >/dev/null 2>&1; then
-      echo "Gateway health: OK (http://127.0.0.1:${GATEWAY_PORT}/healthz)"
-    else
-      echo "Gateway health: UNREACHABLE (is it running?)"
-    fi
-
-    echo ""
-    echo "--- Policies (OpenShell) ---"
-    if command -v openshell >/dev/null 2>&1; then
-      openshell policy get "${SANDBOX_NAME}" 2>/dev/null || echo "(no active policy or sandbox not running)"
-    fi
+    echo "--- Sandbox '${SANDBOX_NAME}' ---"
+    nemoclaw "${SANDBOX_NAME}" status 2>/dev/null || echo "(not running)"
     ;;
-
+  --logs|-l)
+    echo "[monitor] Streaming logs for '${SANDBOX_NAME}' (Ctrl+C to stop)..."
+    nemoclaw "${SANDBOX_NAME}" logs --follow
+    ;;
+  --policy|-p)
+    echo "[monitor] Active policy presets for '${SANDBOX_NAME}':"
+    nemoclaw "${SANDBOX_NAME}" policy-list
+    ;;
+  --debug)
+    OUTFILE="/tmp/nemoclaw-debug-$(date +%Y%m%d-%H%M%S).tar.gz"
+    echo "[monitor] Collecting diagnostics -> ${OUTFILE}"
+    nemoclaw debug --sandbox "${SANDBOX_NAME}" --output "${OUTFILE}"
+    echo "[monitor] Diagnostics saved to ${OUTFILE}"
+    ;;
   *)
-    echo "Usage: $0 [--tui|--logs|--stats|--status]"
-    echo "  --tui     OpenShell terminal UI dashboard (default)"
-    echo "  --logs    Tail live gateway logs"
-    echo "  --stats   Docker resource usage"
-    echo "  --status  Quick non-interactive status snapshot"
+    echo "[monitor] Unknown mode: $MODE"
+    echo "Usage: $0 [--tui|--status|--logs|--policy|--debug]"
     exit 1
     ;;
 esac

@@ -1,48 +1,68 @@
-## Policy Files — README
+# Policies — NemoClaw Network Presets
 
-These YAML files define [OpenShell sandbox policies](https://docs.nvidia.com/openshell/latest) that control what the OpenClaw agent is allowed to do inside its sandbox.
+NemoClaw uses a preset-based policy system rather than raw OpenShell policy YAML.
+Inference traffic is automatically routed through the OpenShell L7 gateway proxy,
+so explicit egress rules for LLM providers (Anthropic, OpenAI, OpenRouter) are
+no longer needed in the sandbox policy.
 
-### Files
-
-| File | Purpose |
-|------|---------|
-| `base-policy.yaml` | Minimal — Anthropic/OpenAI/OpenRouter + local Ollama only |
-| `extended-policy.yaml` | Extended — base + Ollama Cloud + GitHub read-only + npm + Telegram |
-
-### Policy Domains
-
-| Domain | When it applies | Reloadable? |
-|--------|----------------|-------------|
-| `filesystem_policy` | Locked at sandbox creation | No — recreate sandbox |
-| `process` | Locked at sandbox creation | No — recreate sandbox |
-| `network_policies` | Hot-reloadable at runtime | Yes — `openshell policy set` |
-
-### Applying a Policy
+## Managing Presets
 
 ```bash
-# Apply base (minimal) policy
-openshell policy set openclaw --policy policies/base-policy.yaml --wait
+# Add a built-in preset
+nemoclaw openclaw policy-add <preset-name>
 
-# Check active policy
-openshell policy get openclaw
+# Available built-in presets:
+#   brave  brew  discord  github  huggingface  jira
+#   npm  outlook  pypi  slack  telegram
 
-# Temporarily extend for a dev task, then revert
-openshell policy set openclaw --policy policies/extended-policy.yaml --wait
-# ... do work ...
-openshell policy set openclaw --policy policies/base-policy.yaml --wait
+# Remove a preset
+nemoclaw openclaw policy-remove <preset-name>
+
+# List active presets
+nemoclaw openclaw policy-list
+
+# Apply a custom preset from a YAML file
+nemoclaw openclaw policy-add --from-file policies/my-preset.yaml
 ```
 
-### Generating Custom Policies
+## Custom Preset Format
 
-Use the OpenShell policy generator skill (point your agent at the OpenShell repo):
+```yaml
+name: my-service
+description: Allow access to my-service API
+
+policies:
+  - name: my-service-api-write
+    match:
+      - host: api.my-service.com
+        port: 443
+        protocol: tcp
+    allow: true
+```
+
+Save as `policies/my-preset.yaml` (committed to git, no secrets) and apply:
 
 ```bash
-git clone https://github.com/NVIDIA/OpenShell.git _openshell-src
-# Point your agent at _openshell-src — it will find the generate-sandbox-policy skill
+nemoclaw openclaw policy-add --from-file policies/my-preset.yaml
 ```
 
-Or describe what you need in plain English: `openshell sandbox connect openclaw` then ask the agent to generate a policy.
+## Legacy Files
 
-### Security Principle
+`base-policy.yaml` and `extended-policy.yaml` in this directory are **legacy
+references** from before the NemoClaw migration. They document the old OpenShell
+raw policy format. They are not applied automatically and are kept only for
+historical reference.
 
-**Start with `base-policy.yaml`.** Only widen access when necessary, for the duration it's needed. Narrow back when done. All policy changes are logged by OpenShell.
+## Policy Tiers
+
+The base tier is set during `nemoclaw onboard`. To change it:
+
+| Tier | Access level |
+|------|-------------|
+| `restricted` | LLM inference only (default) |
+| `balanced` | Inference + curated dev presets |
+| `open` | Inference + broad internet (dev use) |
+
+```bash
+nemoclaw openclaw policy-set-tier balanced
+```

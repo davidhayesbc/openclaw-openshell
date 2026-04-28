@@ -1,74 +1,62 @@
 #!/usr/bin/env bash
 # =============================================================================
-# validate-env.sh — Checks .env for placeholder/example values before startup
+# validate-env.sh -- Validate environment for NemoClaw
+# =============================================================================
+# NemoClaw manages inference credentials in ~/.nemoclaw/credentials.json.
+# This script checks runtime prerequisites and optional .env overrides.
 # =============================================================================
 set -euo pipefail
 
 ENV_FILE="${1:-.env}"
-
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: $ENV_FILE not found. Copy and fill in the template:"
-  echo "  cp .env.example .env && nano .env"
-  exit 1
-fi
-
 ERRORS=0
 
-check_var() {
-  local var="$1"
-  local value
-  value=$(grep -E "^${var}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
-
-  if [[ -z "$value" ]]; then
-    echo "MISSING: $var is not set in $ENV_FILE"
-    ERRORS=$((ERRORS + 1))
-    return
-  fi
-
-  # Check for obvious placeholder values
-  if echo "$value" | grep -qiE "REPLACE_WITH|YOUR_KEY|PLACEHOLDER|CHANGE_ME|TODO|EXAMPLE"; then
-    echo "PLACEHOLDER: $var still contains a placeholder value — set a real value"
-    ERRORS=$((ERRORS + 1))
-    return
-  fi
-
-  # Check OPENCLAW_GATEWAY_TOKEN is long enough
-  if [[ "$var" == "OPENCLAW_GATEWAY_TOKEN" ]] && [[ ${#value} -lt 32 ]]; then
-    echo "WEAK TOKEN: OPENCLAW_GATEWAY_TOKEN is too short (${#value} chars, need ≥32)"
-    echo "  Generate one: openssl rand -hex 32"
-    ERRORS=$((ERRORS + 1))
-    return
-  fi
-
-  echo "OK: $var"
-}
-
-echo "Validating $ENV_FILE..."
+echo "Validating environment for NemoClaw..."
 echo ""
 
-# Required
-check_var "OPENCLAW_GATEWAY_TOKEN"
-
-# At least one LLM provider credential must be set
-ANTHROPIC=$(grep -E "^ANTHROPIC_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-OPENAI=$(grep -E "^OPENAI_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-OPENROUTER=$(grep -E "^OPENROUTER_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-OLLAMA=$(grep -E "^OLLAMA_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-
-if [[ -z "$ANTHROPIC" || "$ANTHROPIC" == *REPLACE* ]] && \
-   [[ -z "$OPENAI" || "$OPENAI" == *REPLACE* ]] && \
-   [[ -z "$OPENROUTER" || "$OPENROUTER" == *REPLACE* ]] && \
-   [[ -z "$OLLAMA" || "$OLLAMA" == *REPLACE* ]]; then
-  echo "MISSING: At least one of ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY / OLLAMA_API_KEY must be set"
-  ERRORS=$((ERRORS + 1))
+# --- Docker ---
+if command -v docker >/dev/null 2>&1; then
+  if docker info >/dev/null 2>&1; then
+    echo "OK: Docker is running ($(docker --version))"
+  else
+    echo "FAIL: Docker is installed but not running. Start Docker and retry."
+    ERRORS=$((ERRORS + 1))
+  fi
 else
-  echo "OK: at least one LLM provider key is set"
+  echo "FAIL: Docker not installed."
+  ERRORS=$((ERRORS + 1))
+fi
+
+# --- NemoClaw ---
+if command -v nemoclaw >/dev/null 2>&1; then
+  echo "OK: NemoClaw $(nemoclaw --version 2>/dev/null || echo 'installed')"
+else
+  echo "WARN: NemoClaw not installed. Run scripts/install.sh."
+fi
+
+# --- Optional .env overrides ---
+if [[ -f "$ENV_FILE" ]]; then
+  set -o allexport; source "$ENV_FILE" 2>/dev/null || true; set +o allexport
+
+  check_placeholder() {
+    local var="$1"
+    local value="${!var:-}"
+    if [[ -n "$value" ]] && echo "$value" | grep -qiE "REPLACE_WITH|YOUR_KEY|PLACEHOLDER|CHANGE_ME|TODO|EXAMPLE"; then
+      echo "PLACEHOLDER: $var still has a placeholder value in $ENV_FILE"
+      ERRORS=$((ERRORS + 1))
+    elif [[ -n "$value" ]]; then
+      echo "OK: $var is set"
+    fi
+  }
+
+  check_placeholder "TELEGRAM_BOT_TOKEN"
+  check_placeholder "DISCORD_BOT_TOKEN"
+  check_placeholder "NEMOCLAW_SANDBOX_NAME"
 fi
 
 echo ""
 if [[ $ERRORS -gt 0 ]]; then
-  echo "Found $ERRORS issue(s). Fix them in $ENV_FILE before starting."
+  echo "Validation failed with ${ERRORS} error(s). Fix the above before running scripts/start.sh."
   exit 1
 else
-  echo "All checks passed. Safe to start."
+  echo "Validation passed."
 fi

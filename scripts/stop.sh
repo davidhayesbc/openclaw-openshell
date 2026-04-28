@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# stop.sh — Stop OpenClaw OpenShell sandbox
+# stop.sh -- Manage the NemoClaw-managed OpenClaw sandbox lifecycle
 # =============================================================================
-# Usage:
-#   scripts/stop.sh
+# NemoClaw sandboxes run persistently inside OpenShell's embedded k3s cluster.
+# Disconnecting from the sandbox (exiting 'nemoclaw <name> connect') leaves the
+# sandbox running in the background; that is the expected operating mode.
 #
-# Stops (in order):
-#   1. The openclaw gateway (kills the persistent exec session host process)
-#   2. The SSH port forward (kills the ssh -N -L tunnel host process)
-#   3. The OpenShell sandbox pod
+# Usage:
+#   scripts/stop.sh               # Show status and help
+#   scripts/stop.sh --snapshot    # Take a workspace snapshot
+#   scripts/stop.sh --destroy     # Destroy sandbox (irreversible, prompts first)
 # =============================================================================
 set -euo pipefail
 
@@ -17,64 +18,37 @@ cd "$REPO_ROOT"
 
 log()  { echo "[stop] $*"; }
 warn() { echo "[stop] WARN: $*" >&2; }
+die()  { echo "[stop] ERROR: $*" >&2; exit 1; }
 
-if [[ $# -gt 0 ]]; then
-  log "ERROR: Unsupported arguments: $*. Use scripts/stop.sh with no arguments."
-  exit 1
-fi
-
-# Load .env for sandbox name
 if [[ -f .env ]]; then
-  set -o allexport
-  source .env 2>/dev/null || true
-  set +o allexport
+  set -o allexport; source .env 2>/dev/null || true; set +o allexport
 fi
 
-SANDBOX_NAME="${OPENSHELL_SANDBOX_NAME:-openclaw}"
-SSH_FWD_PID_FILE="/tmp/openclaw-ssh-fwd.pid"
-GW_EXEC_PID_FILE="/tmp/openclaw-gw-exec.pid"
+SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-openclaw}"
+MODE="${1:-}"
 
-# ---------------------------------------------------------------------------
-# Kill the gateway exec session (host-side openshell sandbox exec process)
-# Terminating this process closes the SSH exec session → gateway is killed
-# ---------------------------------------------------------------------------
-if [[ -f "${GW_EXEC_PID_FILE}" ]]; then
-  GW_PID=$(cat "${GW_EXEC_PID_FILE}")
-  if kill -0 "${GW_PID}" 2>/dev/null; then
-    log "Stopping gateway (exec session PID ${GW_PID})..."
-    kill "${GW_PID}" 2>/dev/null || warn "Could not kill PID ${GW_PID}"
-    sleep 1
-  else
-    log "Gateway exec session PID ${GW_PID} already gone."
-  fi
-  rm -f "${GW_EXEC_PID_FILE}"
-else
-  log "No gateway PID file found (may already be stopped)."
-fi
+command -v nemoclaw >/dev/null 2>&1 || die "NemoClaw not installed. Run scripts/install.sh first."
 
-# ---------------------------------------------------------------------------
-# Kill the SSH port forward
-# ---------------------------------------------------------------------------
-if [[ -f "${SSH_FWD_PID_FILE}" ]]; then
-  SSH_PID=$(cat "${SSH_FWD_PID_FILE}")
-  if kill -0 "${SSH_PID}" 2>/dev/null; then
-    log "Stopping SSH port forward (PID ${SSH_PID})..."
-    kill "${SSH_PID}" 2>/dev/null || warn "Could not kill PID ${SSH_PID}"
-  else
-    log "SSH forward PID ${SSH_PID} already gone."
-  fi
-  rm -f "${SSH_FWD_PID_FILE}"
-fi
-rm -f /tmp/openclaw-ssh.conf
-
-# ---------------------------------------------------------------------------
-# Delete the sandbox pod
-# ---------------------------------------------------------------------------
-command -v openshell >/dev/null 2>&1 || { warn "OpenShell not found; sandbox may still be running."; exit 1; }
-
-log "Deleting OpenShell sandbox '${SANDBOX_NAME}'..."
-openshell sandbox delete "${SANDBOX_NAME}" 2>/dev/null \
-  && log "Sandbox deleted." \
-  || log "Sandbox not found or already deleted."
-
-log "Done."
+case "$MODE" in
+  --destroy)
+    warn "This permanently deletes sandbox '${SANDBOX_NAME}' and all workspace files."
+    warn "Run 'scripts/stop.sh --snapshot' first to preserve workspace state."
+    nemoclaw "${SANDBOX_NAME}" destroy
+    ;;
+  --snapshot)
+    log "Creating workspace snapshot for sandbox '${SANDBOX_NAME}'..."
+    nemoclaw "${SANDBOX_NAME}" snapshot create
+    log "Snapshot created. List snapshots: nemoclaw ${SANDBOX_NAME} snapshot list"
+    ;;
+  *)
+    log "Sandbox '${SANDBOX_NAME}' status:"
+    nemoclaw "${SANDBOX_NAME}" status 2>/dev/null || log "(sandbox not running)"
+    log ""
+    log "NemoClaw sandboxes run persistently. To exit an active session, type"
+    log "'exit' or '/exit' inside the sandbox shell."
+    log ""
+    log "Options:"
+    log "  scripts/stop.sh --snapshot   Create a workspace snapshot"
+    log "  scripts/stop.sh --destroy    Destroy the sandbox (irreversible)"
+    ;;
+esac

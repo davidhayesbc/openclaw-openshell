@@ -1,126 +1,34 @@
 # =============================================================================
-# OpenShell Policy: Base (Minimal) — for OpenClaw Sandbox
+# LEGACY REFERENCE — NemoClaw Migration
 # =============================================================================
-# This is the starting point: maximum restriction.
-# Only allows outbound connections to Anthropic/OpenAI/OpenRouter APIs and
-# local Ollama on 127.0.0.1:11434.
+# This file was the raw OpenShell policy for the pre-NemoClaw setup.
+# It is kept for reference only. NemoClaw manages inference routing through
+# the OpenShell gateway L7 proxy; the direct egress rules for Anthropic,
+# OpenAI, and OpenRouter are no longer needed in the sandbox policy.
 #
-# Apply with:
-#   openshell policy set ${OPENSHELL_SANDBOX_NAME:-openclaw} \
-#     --policy policies/base-policy.yaml --wait
+# With NemoClaw:
+#   - Add built-in presets via:   nemoclaw <name> policy-add <preset>
+#   - Built-in presets available: brave brew discord github huggingface
+#                                  jira npm outlook pypi slack telegram
+#   - Custom presets via:         nemoclaw <name> policy-add --from-file <path>
+#   - List active presets via:    nemoclaw <name> policy-list
 #
-# To extend access, use policies/extended-policy.yaml or create a custom one.
-# Use `openshell policy generate` to generate policies from plain-language
-# descriptions or API docs.
+# Custom preset format (NemoClaw YAML):
 # =============================================================================
-
-version: 1 
-
-# --- Filesystem policy (locked at sandbox creation) ---
-filesystem_policy:
-  include_workdir: true
-  read_only:
-    - /usr
-    - /lib
-    - /lib64
-    - /proc
-    - /dev/urandom
-    - /app
-    - /etc
-    - /var/log
-  read_write:
-    - /sandbox
-    - /tmp
-    - /dev/null
-    - /home/node/.openclaw
-
-landlock:
-  compatibility: best_effort    # fall back gracefully on older kernels
-
-# --- Process policy (locked at sandbox creation) ---
-# NOTE: Do NOT set run_as_user/run_as_group here — the openclaw community
-# image runs as 'node'. Overriding it breaks the supervisor connection.
-# If you use a custom image, set the user in the Dockerfile instead.
-process: {}
-
-# --- Network policies (hot-reloadable at runtime) ---
-# Only LLM API endpoints are allowed. All other outbound connections are denied.
-network_policies:
-  anthropic_api_write:
-    name: anthropic-api-write
-    endpoints:
-      - host: api.anthropic.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
-
-  openai_api_write:
-    name: openai-api-write
-    endpoints:
-      - host: api.openai.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
-
-  openrouter_api_write:
-    name: openrouter-api-write
-    endpoints:
-      - host: openrouter.ai
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
-
-  ollama_local_write:
-    name: ollama-local-write
-    endpoints:
-      - host: 127.0.0.1
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: localhost
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: host.docker.internal
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: gateway.docker.internal
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 172.17.0.1
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 10.255.255.254
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 192.168.50.21
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
-
+#
+# name: my-preset
+# description: Allow my-service API
+# policies:
+#   - name: my-service-write
+#     match:
+#       - host: api.my-service.com
+#         port: 443
+#         protocol: tcp
+#     allow: true
+#
+# =============================================================================
+#
+# Apply a custom preset:
+#   nemoclaw openclaw policy-add --from-file policies/my-preset.yaml
+#
+# =============================================================================

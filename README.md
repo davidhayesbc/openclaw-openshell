@@ -1,6 +1,6 @@
-# OpenClaw + OpenShell — Secure Self-Hosted Setup
+# OpenClaw + NemoClaw — Secure Self-Hosted Setup
 
-A security-hardened, git-tracked setup for running [OpenClaw](https://openclaw.ai/) (AI personal assistant) inside [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) (sandboxed agent runtime).
+A git-tracked setup for running [OpenClaw](https://openclaw.ai/) (AI personal assistant) via [NemoClaw](https://github.com/NVIDIA/NemoClaw) — NVIDIA's reference stack that wraps OpenClaw + OpenShell with a managed CLI, onboard wizard, and built-in credential management.
 
 ## Architecture
 
@@ -9,151 +9,154 @@ A security-hardened, git-tracked setup for running [OpenClaw](https://openclaw.a
 │  Host Machine                                            │
 │                                                          │
 │  ┌─────────────────────────────────────────────────┐     │
-│  │  OpenShell Gateway (K3s-in-Docker)              │     │
+│  │  NemoClaw                                       │     │
 │  │                                                 │     │
 │  │  ┌──────────────────────────────────────────┐   │     │
-│  │  │  OpenClaw Sandbox                        │   │     │
+│  │  │  OpenShell Gateway (k3s-in-Docker)       │   │     │
 │  │  │                                          │   │     │
-│  │  │  ┌──────────┐  ┌──────────────────────┐  │   │     │
-│  │  │  │ OpenClaw │  │  Policy Engine       │  │   │     │
-│  │  │  │ Gateway  │  │  - Network: block all│  │   │     │
-│  │  │  │ :18789   │  │    except LLM APIs   │  │   │     │
-│  │  │  │          │  │  - FS: workspace only│  │   │     │
-│  │  │  │          │  │  - Process: no privesc│ │   │     │
-│  │  │  └──────────┘  └──────────────────────┘  │   │     │
+│  │  │  ┌──────────────────────────────────┐    │   │     │
+│  │  │  │  OpenClaw Sandbox                │    │   │     │
+│  │  │  │  - Landlock + seccomp + netns    │    │   │     │
+│  │  │  │  - Inference proxied via gateway │    │   │     │
+│  │  │  │  - Network: deny-by-default      │    │   │     │
+│  │  │  └──────────────────────────────────┘    │   │     │
+│  │  │                                          │   │     │
+│  │  │  L7 Inference Proxy                      │   │     │
+│  │  │  - Injects credentials at network edge   │   │     │
+│  │  │  - Sandbox uses inference.local only     │   │     │
 │  │  └──────────────────────────────────────────┘   │     │
 │  └─────────────────────────────────────────────────┘     │
 │                           │                              │
-│              port-forward ↓ (127.0.0.1:18789)            │
+│                   nemoclaw <name> connect                │
 │                    Browser / CLI                         │
 └──────────────────────────────────────────────────────────┘
 ```
 
-**OpenShell** wraps OpenClaw in a container with policy-enforced egress. All outbound connections go through OpenShell's policy engine. **Network and filesystem access are deny-by-default.**
+**NemoClaw** manages the full lifecycle. The sandbox never holds raw provider keys — credentials are injected by the OpenShell L7 gateway at the network boundary.
 
 ## Quick Start
 
 ### 1. Prerequisites
 
-- Docker Desktop (or Docker Engine + Compose v2)
+- Docker Desktop (or Docker Engine) running
 - Git
-- Linux or macOS (Windows: use WSL2)
+- Linux or macOS (Windows: WSL2)
 
-### 2. First-time setup
+### 2. Install
 
 ```bash
 git clone <this-repo> openclaw-openshell
 cd openclaw-openshell
 
-# Install OpenShell CLI and set up directories
+# Installs NemoClaw CLI (Node.js via nvm + nemoclaw npm package, no sudo)
 bash scripts/install.sh
+```
 
-# Edit .env with your API keys and a strong gateway token
+### 3. Configure (optional)
+
+```bash
+cp .env.example .env
+# Edit NEMOCLAW_SANDBOX_NAME, messaging tokens, etc.
 nano .env
-# Generate a token: openssl rand -hex 32
 
-# Validate
 bash scripts/validate-env.sh
 ```
 
-### 3. Start
+### 4. Onboard + launch
 
 ```bash
 bash scripts/start.sh
+# First run: guided onboard wizard (provider, model, policy tier, optional channels)
+# Subsequent runs: auto-connects to the running sandbox
 ```
-
-### 4. Open Control UI
-
-Visit **http://127.0.0.1:18789/** — use the gateway token from your `.env`.
 
 ### 5. Monitor
 
 ```bash
-bash scripts/monitor.sh            # OpenShell TUI (live cluster dashboard)
-bash scripts/monitor.sh --logs     # Tail gateway logs
-bash scripts/monitor.sh --status   # Quick snapshot
+bash scripts/monitor.sh                # OpenShell TUI (live dashboard, default)
+bash scripts/monitor.sh --status       # Status snapshot
+bash scripts/monitor.sh --logs         # Stream sandbox logs
+bash scripts/monitor.sh --policy       # Show active network policy presets
 ```
 
 ### 6. Security audit
 
 ```bash
 bash scripts/audit.sh
-bash scripts/audit.sh --deep
+bash scripts/audit.sh --deep           # Full diagnostics tarball
 ```
 
 ---
 
 ## Security Model
 
-### What OpenShell Provides
+### What NemoClaw / OpenShell Provides
 
-| Layer | What it protects | Reloadable? |
-|-------|-----------------|-------------|
-| **Network policy** | Blocks all outbound except allowed LLM APIs | ✅ Hot-reload |
-| **Filesystem policy** | Restricts reads/writes to workspace only | ❌ Locked at creation |
-| **Process policy** | Blocks privilege escalation, restricts syscalls | ❌ Locked at creation |
-| **Inference router** | Can route LLM calls to controlled backends | ✅ Hot-reload |
+| Layer | Enforcement |
+|-------|-------------|
+| **Inference credentials** | Injected by gateway L7 proxy; sandbox never holds raw keys |
+| **Network policy** | Deny-by-default + preset-based allow rules (hot-reloadable) |
+| **Filesystem isolation** | Landlock: workspace-only access |
+| **Process isolation** | seccomp + netns; no privilege escalation |
+| **Token management** | `nemoclaw <name> gateway-token` (no `.env` token needed) |
 
-### What OpenClaw Config Provides
+### What OpenClaw Config Provides (`config/openclaw.json`)
 
-- `gateway.bind: loopback` — control UI localhost-only
 - `tools.exec.security: deny` — no shell execution
 - `tools.fs.workspaceOnly: true` — no host filesystem access
-- `tools.elevated.enabled: false` — no privileged operations
 - `session.dmScope: per-channel-peer` — session isolation
-- `models.providers.ollama` — native Ollama API support for local models (e.g. Gemma 4)
+- `models.providers.ollama` — local Ollama inference (via inference proxy)
 
 ---
 
 ## Network Policies
 
-Policies live in `policies/` and are tracked in git.
+NemoClaw uses a tiered policy system with built-in presets.
 
-| Policy | Allows |
-|--------|--------|
-| `base-policy.yaml` | Anthropic/OpenAI/OpenRouter + local Ollama (`127.0.0.1:11434`) |
-| `extended-policy.yaml` | Base + Ollama Cloud (`ollama.com`) + GitHub read-only + npm |
+### Policy tiers (set during onboard)
+
+| Tier | Access |
+|------|--------|
+| `restricted` | LLM inference only |
+| `balanced` | Inference + curated dev tools |
+| `open` | Inference + broad internet (developer use) |
+
+### Built-in presets
 
 ```bash
-# Apply base (minimal) policy
-openshell policy set openclaw --policy policies/base-policy.yaml --wait
+# Add a preset
+nemoclaw openclaw policy-add github
+nemoclaw openclaw policy-add npm
+nemoclaw openclaw policy-add telegram
 
-# Check what's active
-openshell policy get openclaw
+# Available: brave brew discord github huggingface jira npm outlook pypi slack telegram
 
-# Temporarily extend, then revert
-openshell policy set openclaw --policy policies/extended-policy.yaml --wait
-# ... do work ...
-openshell policy set openclaw --policy policies/base-policy.yaml --wait
+# List active presets
+nemoclaw openclaw policy-list
 ```
+
+### Custom presets
+
+```bash
+# Apply a custom preset from file
+nemoclaw openclaw policy-add --from-file policies/my-preset.yaml
+```
+
+See `policies/README.md` for custom preset format and `policies/base-policy.yaml` for the legacy OpenShell policy (retained as reference).
 
 ---
 
-## Ollama + Gemma 4 (Sandbox)
+## Ollama (Local Inference)
 
-Use this when you want local inference through Ollama while keeping OpenShell policy enforcement.
+NemoClaw routes Ollama calls through the inference proxy. Select Ollama during the onboard wizard or:
 
 ```bash
-# 1) Enable Ollama provider in .env
-echo 'OLLAMA_API_KEY=ollama-local' >> .env
+# Pull model on host
+ollama pull llama3.1:8b
 
-# 2) Ensure Ollama is reachable at 127.0.0.1:11434 from the sandbox
-# (If running locally, start Ollama on the host and make it reachable to the sandbox runtime)
-
-# 3) Pull Gemma 4 in Ollama
-ollama pull gemma4
-
-# 4) Restart OpenClaw sandbox so config/env are reloaded
-bash scripts/stop.sh
-bash scripts/start.sh
-
-# 5) Select Gemma 4 in OpenClaw
-openclaw models set ollama/gemma4
+# NemoClaw will proxy inference.local -> host Ollama
+# The OLLAMA_BASE_URL in .env pre-seeds the wizard with the endpoint
 ```
-
-Notes:
-- `config/openclaw.json` already includes an Ollama provider entry and a `gemma4` alias.
-- Use native Ollama URL format only (`http://...:11434`), not `/v1`.
 
 ---
 
@@ -162,18 +165,13 @@ Notes:
 All configs are version-controlled. To roll back:
 
 ```bash
-# See config history
 git log --oneline config/openclaw.json
-git log --oneline policies/
 
 # Restore a specific version
 git checkout <sha> -- config/openclaw.json
-git checkout <sha> -- policies/base-policy.yaml
 
-# Apply the restored config
+# Apply to sandbox (NemoClaw snapshots on next onboard)
 cp config/openclaw.json ~/.openclaw/openclaw.json
-openshell policy set openclaw --policy policies/base-policy.yaml --wait
-scripts/stop.sh && scripts/start.sh
 ```
 
 ---
@@ -182,29 +180,29 @@ scripts/stop.sh && scripts/start.sh
 
 ```
 .
-├── .env.example          # Secrets template (committed — no real values)
-├── .gitignore            # Ignores .env, credentials, workspace data
-├── .gitleaks.toml        # Secret scanning configuration
-├── .pre-commit-config.yaml  # Git pre-commit hooks (gitleaks)
-├── docker-compose.yml    # Optional local compose resources (not used by scripts)
+├── .env.example              # Template (committed — no real values)
+├── .gitignore
+├── .gitleaks.toml            # Secret scanning config
+├── .pre-commit-config.yaml   # Git pre-commit hooks (gitleaks)
+├── docker-compose.yml        # SUPERSEDED — legacy reference only
 ├── policies/
-│   ├── base-policy.yaml     # Minimal OpenShell network policy
-│   ├── extended-policy.yaml # Extended access for dev tasks
-│   └── README.md
+│   ├── base-policy.yaml      # LEGACY OpenShell policy — see README inside
+│   ├── extended-policy.yaml  # LEGACY — see README inside
+│   └── README.md             # NemoClaw preset guide
 ├── config/
-│   ├── openclaw.json        # Hardened OpenClaw gateway config (no secrets)
+│   ├── openclaw.json         # OpenClaw agent config (no secrets)
 │   └── README.md
 ├── scripts/
-│   ├── install.sh           # One-time setup
-│   ├── start.sh             # Start OpenShell sandbox
-│   ├── stop.sh              # Stop
-│   ├── monitor.sh           # Monitoring dashboard
-│   ├── audit.sh             # Security audit
-│   ├── update.sh            # Update components
-│   ├── rotate-token.sh      # Rotate gateway token
-│   └── validate-env.sh      # Validate .env before startup
+│   ├── install.sh            # One-time NemoClaw install
+│   ├── start.sh              # Onboard or connect
+│   ├── stop.sh               # Snapshot or destroy sandbox
+│   ├── update.sh             # Update NemoClaw CLI + sandbox images
+│   ├── monitor.sh            # TUI, logs, policy, diagnostics
+│   ├── audit.sh              # Security audit
+│   ├── validate-env.sh       # Validate environment
+│   └── rotate-token.sh       # Print gateway token
 └── docs/
-    └── security.md          # Detailed security guide
+    └── security.md
 ```
 
 ---
@@ -212,31 +210,32 @@ scripts/stop.sh && scripts/start.sh
 ## Updating
 
 ```bash
-bash scripts/update.sh --check     # Check for available updates
-bash scripts/update.sh             # Update all components
-bash scripts/update.sh --openshell # OpenShell CLI only
-bash scripts/update.sh --openclaw  # OpenClaw image only
+bash scripts/update.sh --check       # Check for stale sandbox images
+bash scripts/update.sh               # Update CLI + sandbox images
+bash scripts/update.sh --cli         # NemoClaw CLI only
+bash scripts/update.sh --sandboxes   # Sandbox images only
 ```
 
-## Rotating Credentials
+## Stopping / Lifecycle
 
 ```bash
-bash scripts/rotate-token.sh    # Generate new gateway token + restart
+bash scripts/stop.sh                 # Show status + help
+bash scripts/stop.sh --snapshot      # Create workspace snapshot
+bash scripts/stop.sh --destroy       # Destroy sandbox (irreversible)
 ```
 
-## Stopping
+## Gateway Token
 
 ```bash
-bash scripts/stop.sh            # Stop OpenShell sandbox
+bash scripts/rotate-token.sh         # Print current gateway token
 ```
 
 ---
 
 ## Further Reading
 
-- [OpenShell Documentation](https://docs.nvidia.com/openshell/latest)
-- [OpenClaw Documentation](https://docs.openclaw.ai)
-- [OpenClaw Security Guide](https://docs.openclaw.ai/gateway/security)
+- [NemoClaw GitHub](https://github.com/NVIDIA/NemoClaw)
+- [NemoClaw Documentation](https://docs.nvidia.com/nemoclaw/latest)
 - [OpenShell GitHub](https://github.com/NVIDIA/OpenShell)
-- [OpenClaw GitHub](https://github.com/openclaw/openclaw)
+- [OpenClaw Documentation](https://docs.openclaw.ai)
 - [Security Details](docs/security.md)

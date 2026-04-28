@@ -1,219 +1,31 @@
 # =============================================================================
-# OpenShell Policy: Extended — Additional Access Profiles
+# LEGACY REFERENCE — NemoClaw Migration
 # =============================================================================
-# Extends the base policy to allow common developer tasks.
-# Apply ONLY when you need the extra access, then switch back to base-policy.
+# This file was the extended OpenShell policy for Docker-internal Ollama access
+# in the pre-NemoClaw setup.
+# It is kept for reference only. See base-policy.yaml for migration notes.
+#
+# For Ollama via NemoClaw, inference is proxied through the OpenShell gateway
+# using the 'inference.local' routing. Direct host-to-container Ollama access
+# is no longer required. If you need to expose Ollama for non-inference use
+# (e.g. direct REST calls from within the sandbox), create a custom preset:
+#
+# name: ollama-docker-internal
+# description: Allow direct Ollama access via Docker networking
+# policies:
+#   - name: ollama-host-docker-internal
+#     match:
+#       - host: host.docker.internal
+#         port: 11434
+#         protocol: tcp
+#     allow: true
+#   - name: ollama-gateway-docker-internal
+#     match:
+#       - host: gateway.docker.internal
+#         port: 11434
+#         protocol: tcp
+#     allow: true
 #
 # Apply with:
-#   openshell policy set ${OPENSHELL_SANDBOX_NAME:-openclaw} \
-#     --policy policies/extended-policy.yaml --wait
-#
-# Revert to minimal:
-#   openshell policy set ${OPENSHELL_SANDBOX_NAME:-openclaw} \
-#     --policy policies/base-policy.yaml --wait
+#   nemoclaw openclaw policy-add --from-file policies/ollama-docker-preset.yaml
 # =============================================================================
-
-version: 1
-
-filesystem_policy:
-  include_workdir: true
-  read_only:
-    - /usr
-    - /lib
-    - /lib64
-    - /proc
-    - /dev/urandom
-    - /app
-    - /etc
-    - /var/log
-  read_write:
-    - /sandbox
-    - /tmp
-    - /dev/null
-    - /home/node/.openclaw
-
-landlock:
-  compatibility: best_effort
-
-process: {}  # do not override — openclaw image uses 'node' user
-
-network_policies:
-  anthropic_api_write:
-    name: anthropic-api-write
-    endpoints:
-      - host: api.anthropic.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
-
-  openai_api_write:
-    name: openai-api-write
-    endpoints:
-      - host: api.openai.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
-
-  openrouter_api_write:
-    name: openrouter-api-write
-    endpoints:
-      - host: openrouter.ai
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
-
-  ollama_local_write:
-    name: ollama-local-write
-    endpoints:
-      - host: 127.0.0.1
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: localhost
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: host.docker.internal
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: gateway.docker.internal
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 172.17.0.1
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 10.255.255.254
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 192.168.50.21
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
-
-  ollama_cloud_write:
-    name: ollama-cloud-write
-    endpoints:
-      - host: ollama.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
-
-  lmstudio_local_write:
-    name: lmstudio-local-write
-    endpoints:
-      - host: 127.0.0.1
-        port: 1234
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: localhost
-        port: 1234
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: host.docker.internal
-        port: 1234
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: gateway.docker.internal
-        port: 1234
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 172.17.0.1
-        port: 1234
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 10.255.255.254
-        port: 1234
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 192.168.50.21
-        port: 1234
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node
-
-  github_api_read:
-    name: github-api-read
-    endpoints:
-      - host: api.github.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-    binaries:
-      - path: /usr/bin/curl
-      - path: /usr/local/bin/node
-      - path: /usr/bin/git
-
-  github_raw_read:
-    name: github-raw-read
-    endpoints:
-      - host: raw.githubusercontent.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-    binaries:
-      - path: /usr/bin/curl
-
-  npm_registry_read:
-    name: npm-registry-read
-    endpoints:
-      - host: registry.npmjs.org
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-    binaries:
-      - path: /usr/bin/npm
-      - path: /usr/local/bin/npm
-
-  telegram_api_write:
-    name: telegram-api-write
-    endpoints:
-      - host: api.telegram.org
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-    binaries:
-      - path: /usr/local/bin/node
-      - path: /usr/bin/node

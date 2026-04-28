@@ -1,4 +1,20 @@
 # =============================================================================
+# SUPERSEDED — NemoClaw Migration
+# =============================================================================
+# NemoClaw manages the OpenClaw sandbox via k3s embedded in the OpenShell
+# gateway container. This docker-compose.yml is NO LONGER USED by any of the
+# scripts in this repo.
+#
+# It is retained as a reference for the security configuration that was
+# applied when running OpenClaw directly with Docker Compose. The same
+# security properties (capability drops, no-new-privileges, loopback port
+# binding, memory/CPU limits, network isolation) are now enforced by
+# OpenShell's Landlock + seccomp + netns isolation layer at the k3s pod level.
+#
+# If you need to run OpenClaw WITHOUT OpenShell/NemoClaw, you can adapt this
+# file. Otherwise, use: scripts/start.sh
+# =============================================================================
+# =============================================================================
 # OpenClaw Docker Compose — Security-Hardened Configuration
 # =============================================================================
 # Based on the official openclaw/openclaw docker-compose.yml with:
