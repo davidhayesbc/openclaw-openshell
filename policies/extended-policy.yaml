@@ -128,6 +128,48 @@ network_policies:
       - path: /usr/local/bin/node
       - path: /usr/bin/node
 
+  lmstudio_local_write:
+    name: lmstudio-local-write
+    endpoints:
+      - host: 127.0.0.1
+        port: 1234
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: localhost
+        port: 1234
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: host.docker.internal
+        port: 1234
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: gateway.docker.internal
+        port: 1234
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: 172.17.0.1
+        port: 1234
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: 10.255.255.254
+        port: 1234
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: 192.168.50.21
+        port: 1234
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - path: /usr/local/bin/node
+      - path: /usr/bin/node
+
   github_api_read:
     name: github-api-read
     endpoints:

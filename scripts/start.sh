@@ -262,8 +262,10 @@ cat config/openclaw.json \
       env \
         OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN}" \
         OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-}" \
+        LMSTUDIO_BASE_URL="${LMSTUDIO_BASE_URL:-}" \
+        LM_API_TOKEN="${LM_API_TOKEN:-}" \
         OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
-        node -e 'let raw="";process.stdin.setEncoding("utf8");process.stdin.on("data",(chunk)=>{raw+=chunk;});process.stdin.on("end",()=>{const cfg=JSON.parse(raw);cfg.gateway=cfg.gateway||{};cfg.gateway.auth=cfg.gateway.auth||{};cfg.gateway.auth.token=process.env.OPENCLAW_GATEWAY_TOKEN;const ollamaBaseUrl=process.env.OLLAMA_BASE_URL;if(ollamaBaseUrl&&cfg.models&&cfg.models.providers&&cfg.models.providers.ollama){cfg.models.providers.ollama.baseUrl=ollamaBaseUrl;}const openrouterKey=process.env.OPENROUTER_API_KEY;if(openrouterKey&&cfg.models&&cfg.models.providers&&cfg.models.providers.openrouter){cfg.models.providers.openrouter.apiKey=openrouterKey;}process.stdout.write(JSON.stringify(cfg,null,2));});' \
+        node -e 'let raw="";process.stdin.setEncoding("utf8");process.stdin.on("data",(chunk)=>{raw+=chunk;});process.stdin.on("end",()=>{const cfg=JSON.parse(raw);cfg.gateway=cfg.gateway||{};cfg.gateway.auth=cfg.gateway.auth||{};cfg.gateway.auth.token=process.env.OPENCLAW_GATEWAY_TOKEN;const ollamaBaseUrl=process.env.OLLAMA_BASE_URL;if(ollamaBaseUrl&&cfg.models&&cfg.models.providers&&cfg.models.providers.ollama){cfg.models.providers.ollama.baseUrl=ollamaBaseUrl;}const lmstudioBaseUrl=process.env.LMSTUDIO_BASE_URL;if(lmstudioBaseUrl&&cfg.models&&cfg.models.providers&&cfg.models.providers.lmstudio){cfg.models.providers.lmstudio.baseUrl=lmstudioBaseUrl;}const lmApiToken=process.env.LM_API_TOKEN;if(lmApiToken&&cfg.models&&cfg.models.providers&&cfg.models.providers.lmstudio){cfg.models.providers.lmstudio.apiKey=lmApiToken;}const openrouterKey=process.env.OPENROUTER_API_KEY;if(openrouterKey&&cfg.models&&cfg.models.providers&&cfg.models.providers.openai){cfg.models.providers.openai.apiKey=openrouterKey;}process.stdout.write(JSON.stringify(cfg,null,2));});' \
   | openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'cat > "$HOME/.openclaw/openclaw.json"'
 openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc \
   'test -s "$HOME/.openclaw/openclaw.json" && echo config_synced' \
@@ -394,7 +396,8 @@ nohup openshell sandbox exec \
   -- env \
     NODE_OPTIONS="--require /tmp/patch-net.cjs" \
     TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
-      OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
+    OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
+    LM_API_TOKEN="${LM_API_TOKEN:-}" \
     openclaw gateway run \
   > "${GW_EXEC_LOG}" 2>&1 &
 GW_EXEC_PID=$!
