@@ -4,13 +4,28 @@
 
 NODE_BIN_DIR=""
 
+normalize_env_file_line_endings() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+
+  # If CRLF is present, rewrite the file as LF so direct `source .env`
+  # also works in WSL/Linux shells (not just process-substitution loading).
+  if grep -q $'\r' "$env_file" 2>/dev/null; then
+    local tmp
+    tmp="$(mktemp)"
+    sed 's/\r$//' "$env_file" > "$tmp"
+    cat "$tmp" > "$env_file"
+    rm -f "$tmp"
+  fi
+}
+
 load_env_file() {
   local env_file="$1"
   [[ -f "$env_file" ]] || return 0
-  # Strip CRLF line endings so .env works in WSL/bash.
+  normalize_env_file_line_endings "$env_file"
   set -o allexport
   # shellcheck disable=SC1090
-  source <(sed 's/\r$//' "$env_file") 2>/dev/null || true
+  source "$env_file" 2>/dev/null || true
   set +o allexport
 }
 

@@ -10,6 +10,19 @@ set -euo pipefail
 ENV_FILE="${1:-.env}"
 ERRORS=0
 
+normalize_env_file_line_endings() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+  if grep -q $'\r' "$env_file" 2>/dev/null; then
+    local tmp
+    tmp="$(mktemp)"
+    sed 's/\r$//' "$env_file" > "$tmp"
+    cat "$tmp" > "$env_file"
+    rm -f "$tmp"
+    echo "INFO: Normalized CRLF to LF in $env_file"
+  fi
+}
+
 echo "Validating environment for NemoClaw..."
 echo ""
 
@@ -35,6 +48,7 @@ fi
 
 # --- Optional .env overrides ---
 if [[ -f "$ENV_FILE" ]]; then
+  normalize_env_file_line_endings "$ENV_FILE"
   set -o allexport; source "$ENV_FILE" 2>/dev/null || true; set +o allexport
 
   check_placeholder() {
