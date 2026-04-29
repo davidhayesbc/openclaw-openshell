@@ -47,8 +47,9 @@ else
   log "Installs Node.js (via nvm) and prepares NemoClaw dependencies. No sudo required."
   log ""
   curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
-  # Ensure the runnable CLI is the real NemoClaw binary.
+  # Ensure the runnable CLI is the real NemoClaw binary and local source patch is present.
   if command -v nemoclaw >/dev/null 2>&1 && is_real_nemoclaw_cli "$(command -v nemoclaw)"; then
+    ensure_nemoclaw_cli
     log "NemoClaw installed: $(nemoclaw --version 2>/dev/null || echo 'ok')"
   else
     warn "Installer did not leave a runnable NemoClaw CLI in this shell. Repairing from GitHub source..."

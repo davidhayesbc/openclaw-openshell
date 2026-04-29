@@ -43,10 +43,13 @@ upgrade_sandboxes() {
 
 fresh_onboard() {
   ensure_nemoclaw_cli
+  sync_agent_workspaces_to_host
   prepare_onboard_environment
   warn "Starting fresh onboarding. Any resumable onboarding session will be discarded."
   # shellcheck disable=SC2046
   nemoclaw onboard --fresh $(build_onboard_flags_from_env)
+  local sandbox_name="${NEMOCLAW_SANDBOX_NAME:-openclaw}"
+  sync_agent_workspaces_to_sandbox "$sandbox_name"
 }
 
 case "$MODE" in
