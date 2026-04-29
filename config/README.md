@@ -1,34 +1,55 @@
 ## Config Files — README
 
-This directory contains OpenClaw configuration. No secrets live here.
+This directory contains the public OpenClaw configuration template. No secrets live here.
 
 | File | Committed? | Purpose |
 |------|-----------|---------|
-| `openclaw.example.json` | ✅ yes | Public template — no personal data |
-| `openclaw.json` | ❌ gitignored | Your live config — add your user IDs here |
+| `openclaw.example.json` | ✅ yes | Public template — safe for reuse by other users |
+| `openclaw.json` | ❌ gitignored | Optional local override in this repo |
+
+### Recommended layout
+
+For a mixed public/private setup, keep your real deployed config in a private repo such as:
+
+```bash
+../agents/config/openclaw.json
+```
+
+`scripts/install.sh`, `scripts/start.sh`, and `scripts/update.sh --fresh` now stage the committed config into `~/.openclaw/openclaw.json` before onboard using this precedence:
+
+```text
+1. OPENCLAW_CONFIG_SOURCE
+2. $OPENCLAW_AGENTS_DIR/config/openclaw.json
+3. config/openclaw.json
+```
 
 ### First-time setup
 
-`scripts/install.sh` creates `config/openclaw.json` from the example automatically. Or do it manually:
+You can either keep your real config in the private agents repo, or create a local repo-scoped override:
 
 ```bash
 cp config/openclaw.example.json config/openclaw.json
 # then edit: add your Telegram user ID to allowFrom, etc.
 ```
 
-### How Config is Loaded
+### Exporting UI changes back to Git
 
-`scripts/start.sh` syncs `config/openclaw.json` into the running sandbox before the gateway starts. Any change to this file takes effect on the next `bash scripts/stop.sh && bash scripts/start.sh`.
+If you change settings through the OpenClaw UI, export the live sandbox config back into the committed source path with:
+
+```bash
+bash scripts/export-config.sh
+```
+
+This strips runtime-only fields such as the live gateway token before writing the file.
 
 ### Adding Channels
 
-Edit `config/openclaw.json` to enable channel blocks (Telegram, Discord, WhatsApp). Add bot tokens to `.env`. Never put tokens in the config file.
+Edit your committed `openclaw.json` to enable channel blocks (Telegram, Discord, WhatsApp). Add bot tokens to `.env`. Never put tokens in the config file.
 
 ### Rollback
 
-The example file is version-controlled. To reset your live config to the template:
+The example file is version-controlled. To reset a local repo override to the template:
 
 ```bash
 cp config/openclaw.example.json config/openclaw.json
-# re-add your personal values, then restart
 ```

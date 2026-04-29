@@ -58,21 +58,9 @@ else
   fi
 fi
 
-# --- 3. Seed ~/.openclaw/openclaw.json from repo config ---
+# --- 3. Stage committed OpenClaw config into ~/.openclaw/openclaw.json ---
 # NemoClaw snapshots this during 'nemoclaw onboard' as the base agent config.
-OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
-mkdir -p "$OPENCLAW_CONFIG_DIR"
-chmod 700 "$OPENCLAW_CONFIG_DIR"
-
-if [[ -f config/openclaw.json ]]; then
-  if [[ ! -f "${OPENCLAW_CONFIG_DIR}/openclaw.json" ]]; then
-    cp config/openclaw.json "${OPENCLAW_CONFIG_DIR}/openclaw.json"
-    log "Copied config/openclaw.json -> ${OPENCLAW_CONFIG_DIR}/openclaw.json"
-  else
-    log "Existing ${OPENCLAW_CONFIG_DIR}/openclaw.json preserved (not overwritten)."
-    log "To replace with the repo config: cp config/openclaw.json ${OPENCLAW_CONFIG_DIR}/openclaw.json"
-  fi
-fi
+sync_committed_openclaw_config_to_host "$REPO_ROOT"
 
 # --- 4. Seed agent workspaces ---
 # If OPENCLAW_AGENTS_DIR is set, copy each <dir>/<agent-id>/workspace/ into

@@ -2,6 +2,16 @@
 
 # Shared helpers for managing a runnable NemoClaw CLI inside WSL/Linux.
 
+if ! declare -F log >/dev/null 2>&1; then
+  log() { echo "[nemoclaw-cli] $*"; }
+fi
+if ! declare -F warn >/dev/null 2>&1; then
+  warn() { echo "[nemoclaw-cli] WARN: $*" >&2; }
+fi
+if ! declare -F die >/dev/null 2>&1; then
+  die() { echo "[nemoclaw-cli] ERROR: $*" >&2; exit 1; }
+fi
+
 NODE_BIN_DIR=""
 
 normalize_env_file_line_endings() {
@@ -106,119 +116,12 @@ install_nemoclaw_from_github() {
   rm -rf "$src_dir"
   mkdir -p "$(dirname "$src_dir")"
   git -c advice.detachedHead=false clone --depth 1 --branch "$release_ref" https://github.com/NVIDIA/NemoClaw.git "$src_dir"
-  patch_nemoclaw_startup_for_agents "$src_dir"
   (cd "$src_dir" && npm install --ignore-scripts)
   (cd "$src_dir" && npm run --if-present build:cli)
   if [[ -d "$src_dir/nemoclaw" ]]; then
     (cd "$src_dir/nemoclaw" && npm install --ignore-scripts && npm run build)
   fi
   (cd "$src_dir" && npm link)
-}
-
-patch_nemoclaw_startup_for_agents() {
-  local source_root="$1"
-  local startup_script="$source_root/scripts/nemoclaw-start.sh"
-  [[ -f "$startup_script" ]] || return 0
-
-  # Idempotent patch marker.
-  if grep -q "NEMOCLAW_DYNAMIC_AGENT_REGISTRATION_PATCH=1" "$startup_script" 2>/dev/null; then
-    return 0
-  fi
-
-  python3 - "$startup_script" <<'PY'
-import pathlib
-import re
-import sys
-
-path = pathlib.Path(sys.argv[1])
-src = path.read_text(encoding="utf-8")
-
-fn_block = r'''
-# Dynamically register extra agents staged under /sandbox/.openclaw-data/workspace/#agents.
-# NEMOCLAW_DYNAMIC_AGENT_REGISTRATION_PATCH=1
-apply_dynamic_agent_registration_override() {
-  if [ "$(id -u)" -ne 0 ]; then
-    return 0
-  fi
-
-  local config_file="/sandbox/.openclaw/openclaw.json"
-  local hash_file="/sandbox/.openclaw/.config-hash"
-  local agents_root="/sandbox/.openclaw-data/workspace/#agents"
-  [ -d "$agents_root" ] || return 0
-
-  if [ -L "$config_file" ] || [ -L "$hash_file" ]; then
-    printf '[SECURITY] Refusing dynamic agent registration override — config or hash path is a symlink\n' >&2
-    return 1
-  fi
-
-  local added_count
-  added_count="$(python3 - "$config_file" "$agents_root" <<'PYAGENTS'
-import json
-import os
-import re
-import sys
-
-config_file, agents_root = sys.argv[1], sys.argv[2]
-
-with open(config_file, 'r', encoding='utf-8') as f:
-    cfg = json.load(f)
-
-agents = cfg.setdefault('agents', {})
-existing = agents.get('list')
-if not isinstance(existing, list):
-    existing = []
-    agents['list'] = existing
-
-existing_ids = set()
-for entry in existing:
-    if isinstance(entry, dict):
-        aid = str(entry.get('id', '')).strip()
-        if aid:
-            existing_ids.add(aid)
-
-valid = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
-added = 0
-if os.path.isdir(agents_root):
-    for name in sorted(os.listdir(agents_root)):
-        aid = name.strip()
-        if not aid or aid == 'main' or not valid.match(aid):
-            continue
-        ws = os.path.join(agents_root, aid)
-        if not os.path.isdir(ws):
-            continue
-        if aid in existing_ids:
-            continue
-        existing.append({'id': aid, 'workspace': ws})
-        existing_ids.add(aid)
-        added += 1
-
-if added > 0:
-    with open(config_file, 'w', encoding='utf-8') as f:
-        json.dump(cfg, f, indent=2)
-
-print(added)
-PYAGENTS
-)" || return 1
-
-  if [ "${added_count:-0}" -gt 0 ]; then
-    (cd /sandbox/.openclaw && sha256sum openclaw.json > "$hash_file")
-    printf '[agents] Registered %s dynamic agent(s) from #agents\n' "$added_count" >&2
-  fi
-}
-'''
-
-anchor = "# ── Slack token placeholder resolution"
-if anchor not in src:
-    raise SystemExit("patch anchor not found in nemoclaw-start.sh")
-
-src = src.replace(anchor, fn_block + "\n" + anchor, 1)
-
-# Invoke override in both non-root and root flows near other config mutators.
-src = src.replace("  apply_slack_token_override\n", "  apply_slack_token_override\n  apply_dynamic_agent_registration_override\n", 1)
-src = src.replace("apply_slack_token_override\n", "apply_slack_token_override\napply_dynamic_agent_registration_override\n", 1)
-
-path.write_text(src, encoding="utf-8")
-PY
 }
 
 repair_nemoclaw_cli() {
@@ -240,17 +143,19 @@ repair_nemoclaw_cli() {
 }
 
 ensure_nemoclaw_cli() {
-  command -v nemoclaw >/dev/null 2>&1 || die "NemoClaw not installed. Run scripts/install.sh first."
-  if ! is_real_nemoclaw_cli "$(command -v nemoclaw)"; then
-    repair_nemoclaw_cli
-    is_real_nemoclaw_cli "$(command -v nemoclaw)" || die "NemoClaw is still not runnable after repair."
-  fi
+  # Ensure nvm node and ~/.local/bin are in PATH so we can find the shim.
+  activate_node_runtime
+  export PATH="$HOME/.local/bin:$PATH"
+  hash -r 2>/dev/null || true
 
-  # Ensure our dynamic agent-registration patch is present in the local source.
-  local startup_script="$HOME/.nemoclaw/source/scripts/nemoclaw-start.sh"
-  if [[ ! -f "$startup_script" ]] || ! grep -q "NEMOCLAW_DYNAMIC_AGENT_REGISTRATION_PATCH=1" "$startup_script" 2>/dev/null; then
-    warn "NemoClaw source patch for dynamic agent registration is missing. Refreshing local install..."
+  local nemoclaw_bin
+  nemoclaw_bin="$(command -v nemoclaw 2>/dev/null || resolve_nemoclaw_bin 2>/dev/null)" || true
+  [[ -n "$nemoclaw_bin" ]] || die "NemoClaw not installed. Run scripts/install.sh first."
+
+  if ! is_real_nemoclaw_cli "$nemoclaw_bin"; then
     repair_nemoclaw_cli
+    nemoclaw_bin="$(command -v nemoclaw 2>/dev/null)" || die "NemoClaw is still not runnable after repair."
+    is_real_nemoclaw_cli "$nemoclaw_bin" || die "NemoClaw is still not runnable after repair."
   fi
 }
 
@@ -300,6 +205,112 @@ build_onboard_flags_from_env() {
   echo "${flags[@]:-}"
 }
 
+resolve_committed_openclaw_config_source() {
+  local repo_root="${1:-.}"
+  local candidate=""
+
+  if [[ -n "${OPENCLAW_CONFIG_SOURCE:-}" ]]; then
+    candidate="${OPENCLAW_CONFIG_SOURCE}"
+    [[ "$candidate" = /* ]] || candidate="${repo_root}/${candidate}"
+    [[ -f "$candidate" ]] || die "Configured OPENCLAW_CONFIG_SOURCE not found: $candidate"
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  if [[ -n "${OPENCLAW_AGENTS_DIR:-}" ]]; then
+    candidate="${OPENCLAW_AGENTS_DIR%/}/config/openclaw.json"
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  fi
+
+  candidate="${repo_root}/config/openclaw.json"
+  if [[ -f "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  return 1
+}
+
+sync_committed_openclaw_config_to_host() {
+  local repo_root="${1:-.}"
+  local source_file config_dir dest_file
+
+  source_file="$(resolve_committed_openclaw_config_source "$repo_root")" || {
+    warn "No committed openclaw.json found; leaving host config unchanged."
+    return 0
+  }
+
+  config_dir="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
+  dest_file="${config_dir}/openclaw.json"
+  mkdir -p "$config_dir"
+  chmod 700 "$config_dir" 2>/dev/null || true
+  cp "$source_file" "$dest_file"
+  chmod 600 "$dest_file" 2>/dev/null || true
+  log "Staged committed OpenClaw config: ${source_file} -> ${dest_file}"
+}
+
+export_sandbox_openclaw_config() {
+  local sandbox_name="$1"
+  local repo_root="${2:-.}"
+  local dest_file="${3:-}"
+
+  if [[ -z "$dest_file" ]]; then
+    dest_file="$(resolve_committed_openclaw_config_source "$repo_root")" || \
+      dest_file="${repo_root}/config/openclaw.json"
+  fi
+  [[ "$dest_file" = /* ]] || dest_file="${repo_root}/${dest_file}"
+  mkdir -p "$(dirname "$dest_file")"
+
+  command -v openshell >/dev/null 2>&1 || die "openshell not found; cannot export sandbox config."
+
+  local tmp_raw tmp_clean
+  tmp_raw="$(mktemp)"
+  tmp_clean="$(mktemp)"
+
+  if ! openshell sandbox exec -n "$sandbox_name" -- cat /sandbox/.openclaw/openclaw.json >"$tmp_raw"; then
+    rm -f "$tmp_raw" "$tmp_clean"
+    die "Failed to read /sandbox/.openclaw/openclaw.json from sandbox '$sandbox_name'."
+  fi
+
+  python3 - "$tmp_raw" "$tmp_clean" <<'PY'
+import json
+import pathlib
+import sys
+
+src = pathlib.Path(sys.argv[1])
+dst = pathlib.Path(sys.argv[2])
+
+with src.open('r', encoding='utf-8') as f:
+    data = json.load(f)
+
+gateway = data.get('gateway')
+if isinstance(gateway, dict):
+    auth = gateway.get('auth')
+    if isinstance(auth, dict) and 'token' in auth:
+        auth.pop('token', None)
+
+control_ui = gateway.get('controlUi') if isinstance(gateway, dict) else None
+if isinstance(control_ui, dict):
+    control_ui.pop('allowInsecureAuth', None)
+    control_ui.pop('dangerouslyDisableDeviceAuth', None)
+
+update_cfg = data.get('update')
+if isinstance(update_cfg, dict) and not update_cfg:
+    data.pop('update', None)
+
+with dst.open('w', encoding='utf-8', newline='\n') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+PY
+
+  mv "$tmp_clean" "$dest_file"
+  rm -f "$tmp_raw"
+  log "Exported sanitized sandbox config -> ${dest_file}"
+}
+
 sync_agent_workspaces_to_host() {
   local agents_dir="${OPENCLAW_AGENTS_DIR:-}"
   [[ -n "$agents_dir" && -d "$agents_dir" ]] || return 0
@@ -334,19 +345,12 @@ sync_agent_workspaces_to_sandbox() {
     src="${agent_dir}workspace"
     [[ -d "$src" ]] || continue
 
-    # main uses the primary workspace; extra agents are staged under #agents.
+    # main uses the primary workspace; extra agents use workspace-<id> dirs.
     [[ "$agent_id" == "main" ]] && continue
-    dst="/sandbox/.openclaw-data/workspace/#agents/${agent_id}"
+    dst="/sandbox/.openclaw-data/workspace-${agent_id}"
 
     openshell sandbox exec -n "$sandbox_name" -- mkdir -p "$dst" >/dev/null 2>&1 || true
     openshell sandbox upload "$sandbox_name" "$src" "$dst" >/dev/null 2>&1 || true
-    log "Synced sandbox #agents/${agent_id} from ${src}"
-
-    # Best-effort registration. Current NemoClaw sandboxes may keep config read-only.
-    openshell sandbox exec -n "$sandbox_name" -- \
-      openclaw agents add "$agent_id" --non-interactive --workspace "$dst" --json >/dev/null 2>&1 || true
-    if ! openshell sandbox exec -n "$sandbox_name" -- openclaw agents list --json 2>/dev/null | grep -q "\"id\": \"${agent_id}\""; then
-      warn "Agent '${agent_id}' copied to #agents but not registered (sandbox config appears read-only)."
-    fi
+    log "Synced sandbox workspace-${agent_id} from ${src}"
   done
 }

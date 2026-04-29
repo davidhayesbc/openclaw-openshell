@@ -107,6 +107,8 @@ bash scripts/audit.sh --deep           # Full diagnostics tarball
 - `session.dmScope: per-channel-peer` — session isolation
 - `models.providers.ollama` — local Ollama inference (via inference proxy)
 
+For private deployments, keep the real committed config in `agents/config/openclaw.json` or point `OPENCLAW_CONFIG_SOURCE` at another git-tracked file. The onboarding scripts stage that committed file into `~/.openclaw/openclaw.json` before NemoClaw snapshots the sandbox.
+
 ---
 
 ## Network Policies

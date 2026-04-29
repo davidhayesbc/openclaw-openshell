@@ -43,6 +43,7 @@ upgrade_sandboxes() {
 
 fresh_onboard() {
   ensure_nemoclaw_cli
+  sync_committed_openclaw_config_to_host "$REPO_ROOT"
   sync_agent_workspaces_to_host
   prepare_onboard_environment
   warn "Starting fresh onboarding. Any resumable onboarding session will be discarded."

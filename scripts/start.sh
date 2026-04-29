@@ -30,6 +30,7 @@ ensure_nemoclaw_cli
 command -v docker   >/dev/null 2>&1 || die "Docker not found."
 docker info >/dev/null 2>&1         || die "Docker is not running. Start Docker and retry."
 
+sync_committed_openclaw_config_to_host "$REPO_ROOT"
 sync_agent_workspaces_to_host
 
 prepare_onboard_environment
