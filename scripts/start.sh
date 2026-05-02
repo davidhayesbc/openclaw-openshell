@@ -225,6 +225,29 @@ openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -c \
   || die "Failed to write networkInterfaces patch. Check sandbox exec connectivity."
 
 # ---------------------------------------------------------------------------
+# Step 4b: Install Codex CLI (ChatGPT Plus / device-auth model access)
+#
+# Installs @openai/codex globally so agents can invoke `codex -q "..."` as a
+# shell tool, billed to the user's ChatGPT Plus/Pro subscription.
+# Policy is not yet applied here, so npm can write to /usr/local/lib/.
+# After start.sh, run `scripts/codex-auth.sh` once to authenticate.
+# ---------------------------------------------------------------------------
+log "Installing @openai/codex in sandbox..."
+if openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'command -v codex >/dev/null 2>&1' 2>/dev/null; then
+  log "Codex CLI already installed — skipping."
+else
+  if openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+      bash -lc 'npm install -g @openai/codex 2>&1 | tail -5 && echo codex_installed' \
+      | grep -q "codex_installed"; then
+    log "Codex CLI installed."
+  else
+    warn "Codex CLI install failed — skipping. Run manually inside the sandbox:"
+    warn "  openshell sandbox exec --name ${SANDBOX_NAME} -- npm install -g @openai/codex"
+    warn "Then authenticate: scripts/codex-auth.sh"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Step 5: Onboard openclaw (non-interactive — writes ~/.openclaw/openclaw.json)
 #
 # Tokens are passed inline; the sandbox has no access to the host env.
@@ -338,6 +361,22 @@ if [[ -d "${_AGENTS_SKILLS_DIR}" ]]; then
   log ".agents skills → ~/.agents"
 else
   warn "_openclaw-src/.agents not found at ${_AGENTS_SKILLS_DIR}; skipping skills sync."
+fi
+
+# ---------------------------------------------------------------------------
+# Step 5e: Sync repo skills/ directory into the sandbox ~/.agents/skills/
+#
+# skills/<name>/SKILL.md files are merged into ~/.agents/skills/ so agents
+# can discover and use them alongside the bundled openclaw skills.
+# ---------------------------------------------------------------------------
+_REPO_SKILLS_DIR="${REPO_ROOT}/skills"
+if [[ -d "${_REPO_SKILLS_DIR}" ]]; then
+  log "Syncing repo skills/ into sandbox ~/.agents/skills/..."
+  openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'mkdir -p ~/.agents/skills'
+  tar -C "${_REPO_SKILLS_DIR}" -cf - . \
+    | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+        bash -lc "tar -C ~/.agents/skills -xf -"
+  log "skills/ → ~/.agents/skills"
 fi
 
 # ---------------------------------------------------------------------------
@@ -457,4 +496,7 @@ log ""
 log "Monitor:  scripts/monitor.sh"
 log "Audit:    scripts/audit.sh"
 log "Stop:     scripts/stop.sh"
+log ""
+log "ChatGPT Plus (run once to link your account):"
+log "  scripts/codex-auth.sh"
 log "============================================================"

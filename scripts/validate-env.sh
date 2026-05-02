@@ -17,7 +17,7 @@ ERRORS=0
 check_var() {
   local var="$1"
   local value
-  value=$(grep -E "^${var}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
+  value=$(grep -E "^${var}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || value=""
 
   if [[ -z "$value" ]]; then
     echo "MISSING: $var is not set in $ENV_FILE"

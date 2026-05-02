@@ -31,6 +31,7 @@ filesystem_policy:
     - /tmp
     - /dev/null
     - /home/node/.openclaw
+    - /home/node/.codex
 
 landlock:
   compatibility: best_effort
@@ -66,6 +67,35 @@ network_policies:
     name: openrouter-api-write
     endpoints:
       - host: openrouter.ai
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - path: /usr/local/bin/node
+      - path: /usr/bin/node
+
+  chatgpt_api_write:
+    name: chatgpt-api-write
+    endpoints:
+      - host: chatgpt.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - path: /usr/local/bin/node
+      - path: /usr/bin/node
+
+  openai_auth_write:
+    name: openai-auth-write
+    endpoints:
+      - host: auth.openai.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: idp.openai.com
         port: 443
         protocol: rest
         enforcement: enforce
