@@ -113,7 +113,9 @@ $GATEWAY_REACHABLE || die "OpenShell gateway is not responding. See /tmp/opencla
 # Detect if sandbox is already running and healthy
 # ---------------------------------------------------------------------------
 SANDBOX_EXISTS=false
-if openshell sandbox list 2>/dev/null | grep -q "^${SANDBOX_NAME}"; then
+# Try list first; if the gateway is momentarily flaky, also probe with 'info'
+if openshell sandbox list 2>/dev/null | grep -q "^${SANDBOX_NAME}" \
+    || openshell sandbox info "${SANDBOX_NAME}" >/dev/null 2>&1; then
   SANDBOX_EXISTS=true
   log "Sandbox '${SANDBOX_NAME}' is already running."
   log "Resuming gateway/bootstrap steps for the existing sandbox."
@@ -163,6 +165,14 @@ if [[ "${SANDBOX_EXISTS}" != true ]]; then
     fi
 
     warn "Sandbox create attempt ${attempt}/3 failed."
+    # If the sandbox already exists (created on a prior attempt or run),
+    # treat it as success rather than retrying.
+    if grep -q "already exists" "${CREATE_LOG}" 2>/dev/null; then
+      log "Sandbox already exists — treating as successful create."
+      SANDBOX_EXISTS=true
+      CREATE_OK=true
+      break
+    fi
     if grep -qiE "Gateway .*not reachable|transport error|tls handshake|Connection reset|Connection refused" "${CREATE_LOG}"; then
       warn "Detected gateway connectivity error; restarting OpenShell gateway and retrying..."
       openshell gateway start > /tmp/openclaw-gateway-start.log 2>&1 || true
@@ -266,6 +276,77 @@ openshell sandbox exec --name "${SANDBOX_NAME}" -- \
     --skip-search \
     --skip-skills \
   || die "openclaw onboard failed inside sandbox. Check sandbox connectivity and that openclaw is installed in the image."
+
+# ---------------------------------------------------------------------------
+# Step 5b-pre: Enumerate available Ollama models → update config/openclaw.json
+#
+# Queries /api/tags on the Ollama server (OLLAMA_BASE_URL env var, or the
+# baseUrl already set in config/openclaw.json) and rewrites the
+# models.providers.ollama.models array so the running gateway sees every
+# locally available model. Failures are non-fatal: the existing list is kept.
+# ---------------------------------------------------------------------------
+_OLLAMA_QUERY_URL="${OLLAMA_BASE_URL:-}"
+if [[ -z "${_OLLAMA_QUERY_URL}" ]]; then
+  _OLLAMA_QUERY_URL=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open('config/openclaw.json'))
+    print(cfg.get('models',{}).get('providers',{}).get('ollama',{}).get('baseUrl',''))
+except Exception:
+    pass
+" 2>/dev/null || true)
+fi
+
+if [[ -n "${_OLLAMA_QUERY_URL}" ]]; then
+  log "Enumerating Ollama models from ${_OLLAMA_QUERY_URL}..."
+  _OLLAMA_TAGS_TMP=$(mktemp)
+  if curl -sf --max-time 8 "${_OLLAMA_QUERY_URL}/api/tags" > "${_OLLAMA_TAGS_TMP}" 2>/dev/null \
+      && [[ -s "${_OLLAMA_TAGS_TMP}" ]]; then
+    _OLLAMA_RESULT=$(python3 - "${_OLLAMA_TAGS_TMP}" config/openclaw.json <<'PYEOF'
+import json, sys
+
+tags_file, config_file = sys.argv[1], sys.argv[2]
+with open(tags_file) as f:
+    tags = json.load(f)
+with open(config_file) as f:
+    cfg = json.load(f)
+
+model_names = [
+    m.get('name') or m.get('model', '')
+    for m in tags.get('models', [])
+]
+model_names = [n for n in model_names if n]
+
+if model_names and cfg.get('models', {}).get('providers', {}).get('ollama'):
+    cfg['models']['providers']['ollama']['models'] = [
+        {
+            'id': name, 'name': name,
+            'input': ['text'], 'reasoning': False,
+            'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0},
+            'contextWindow': 131072, 'maxTokens': 8192
+        }
+        for name in model_names
+    ]
+    with open(config_file, 'w') as f:
+        json.dump(cfg, f, indent=2)
+    print('updated:' + ','.join(model_names))
+else:
+    print('skipped')
+PYEOF
+    2>/dev/null || true)
+    if [[ "${_OLLAMA_RESULT}" == updated:* ]]; then
+      _OLLAMA_MODEL_LIST="${_OLLAMA_RESULT#updated:}"
+      log "Ollama models written to config/openclaw.json: ${_OLLAMA_MODEL_LIST}"
+    else
+      warn "Ollama model discovery returned no models — keeping existing list."
+    fi
+  else
+    warn "Could not reach Ollama at ${_OLLAMA_QUERY_URL}/api/tags — keeping existing model list."
+  fi
+  rm -f "${_OLLAMA_TAGS_TMP}"
+else
+  warn "No Ollama base URL configured — skipping model discovery."
+fi
 
 # ---------------------------------------------------------------------------
 # Step 5b: Sync committed gateway config into the sandbox
