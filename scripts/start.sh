@@ -556,6 +556,44 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Step 7b: Configure OpenShell inference routing → local Ollama via
+#          inference.local
+#
+# Direct connections from the sandbox to host.openshell.internal are blocked
+# by the proxy's SSRF protection. inference.local is the designated bypass:
+# the gateway proxies requests to the configured provider without SSRF checks.
+# This step is idempotent and safe to re-run on every start.
+# ---------------------------------------------------------------------------
+log "Configuring OpenShell inference routing (Ollama → inference.local)..."
+_INFERENCE_MODEL="${OLLAMA_DEFAULT_MODEL:-qwen3:latest}"
+_INFERENCE_TIMEOUT="${OLLAMA_INFERENCE_TIMEOUT:-300}"
+
+if openshell provider get ollama-local >/dev/null 2>&1; then
+  openshell provider update ollama-local \
+    --type openai \
+    --credential OPENAI_API_KEY=ollama \
+    --config OPENAI_BASE_URL=http://host.openshell.internal:11434/v1 \
+    2>/dev/null || true
+else
+  openshell provider create \
+    --name ollama-local \
+    --type openai \
+    --credential OPENAI_API_KEY=ollama \
+    --config OPENAI_BASE_URL=http://host.openshell.internal:11434/v1 \
+    2>/dev/null || true
+fi
+
+if openshell inference set \
+    --provider ollama-local \
+    --model "${_INFERENCE_MODEL}" \
+    --timeout "${_INFERENCE_TIMEOUT}" \
+    2>&1 | grep -v "^$" | tail -3; then
+  log "Inference routing: ollama-local, model=${_INFERENCE_MODEL}, timeout=${_INFERENCE_TIMEOUT}s"
+else
+  warn "Inference routing setup failed — LLM requests via inference.local may not work."
+fi
+
+# ---------------------------------------------------------------------------
 # Step 8: Apply security policy (deny-all except LLM APIs)
 # ---------------------------------------------------------------------------
 POLICY_FILE="${OPENSHELL_POLICY_FILE:-policies/policy.yaml}"
