@@ -1,20 +1,18 @@
 # =============================================================================
-# OpenShell Policy: Extended — Additional Access Profiles
+# OpenShell Policy — OpenClaw Sandbox
 # =============================================================================
-# Extends the base policy to allow common developer tasks.
-# Apply ONLY when you need the extra access, then switch back to base-policy.
+# Allows outbound connections to LLM APIs (Anthropic, OpenAI, OpenRouter),
+# local Ollama and LM Studio (via multiple host aliases), Ollama Cloud,
+# Telegram bot API, GitHub API (read-only), and npm registry (read-only).
 #
 # Apply with:
 #   openshell policy set ${OPENSHELL_SANDBOX_NAME:-openclaw} \
-#     --policy policies/extended-policy.yaml --wait
-#
-# Revert to minimal:
-#   openshell policy set ${OPENSHELL_SANDBOX_NAME:-openclaw} \
-#     --policy policies/base-policy.yaml --wait
+#     --policy policies/policy.yaml --wait
 # =============================================================================
 
 version: 1
 
+# --- Filesystem policy (locked at sandbox creation) ---
 filesystem_policy:
   include_workdir: true
   read_only:
@@ -34,10 +32,14 @@ filesystem_policy:
     - /home/node/.codex
 
 landlock:
-  compatibility: best_effort
+  compatibility: best_effort    # fall back gracefully on older kernels
 
-process: {}  # do not override — openclaw image uses 'node' user
+# --- Process policy (locked at sandbox creation) ---
+# NOTE: Do NOT set run_as_user/run_as_group here — the openclaw community
+# image runs as 'node'. Overriding it breaks the supervisor connection.
+process: {}
 
+# --- Network policies (hot-reloadable at runtime) ---
 network_policies:
   anthropic_api_write:
     name: anthropic-api-write
@@ -107,12 +109,7 @@ network_policies:
   ollama_local_write:
     name: ollama-local-write
     endpoints:
-      - host: 127.0.0.1
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: localhost
+      - host: host.openshell.internal
         port: 11434
         protocol: rest
         enforcement: enforce
@@ -122,22 +119,12 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-write
-      - host: gateway.docker.internal
+      - host: 127.0.0.1
         port: 11434
         protocol: rest
         enforcement: enforce
         access: read-write
-      - host: 172.17.0.1
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 10.255.255.254
-        port: 11434
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 192.168.50.21
+      - host: localhost
         port: 11434
         protocol: rest
         enforcement: enforce
@@ -161,12 +148,7 @@ network_policies:
   lmstudio_local_write:
     name: lmstudio-local-write
     endpoints:
-      - host: 127.0.0.1
-        port: 1234
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: localhost
+      - host: host.openshell.internal
         port: 1234
         protocol: rest
         enforcement: enforce
@@ -176,22 +158,12 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-write
-      - host: gateway.docker.internal
+      - host: 127.0.0.1
         port: 1234
         protocol: rest
         enforcement: enforce
         access: read-write
-      - host: 172.17.0.1
-        port: 1234
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 10.255.255.254
-        port: 1234
-        protocol: rest
-        enforcement: enforce
-        access: read-write
-      - host: 192.168.50.21
+      - host: localhost
         port: 1234
         protocol: rest
         enforcement: enforce

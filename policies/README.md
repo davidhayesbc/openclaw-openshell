@@ -6,8 +6,7 @@ These YAML files define [OpenShell sandbox policies](https://docs.nvidia.com/ope
 
 | File | Purpose |
 |------|---------|
-| `base-policy.yaml` | Minimal — Anthropic/OpenAI/OpenRouter + local Ollama only |
-| `extended-policy.yaml` | Extended — base + Ollama Cloud + GitHub read-only + npm + Telegram |
+| `policy.yaml` | Single policy — all LLM APIs, local Ollama & LM Studio, Telegram, GitHub read-only, npm |
 
 ### Policy Domains
 
@@ -17,19 +16,14 @@ These YAML files define [OpenShell sandbox policies](https://docs.nvidia.com/ope
 | `process` | Locked at sandbox creation | No — recreate sandbox |
 | `network_policies` | Hot-reloadable at runtime | Yes — `openshell policy set` |
 
-### Applying a Policy
+### Applying the Policy
 
 ```bash
-# Apply base (minimal) policy
-openshell policy set openclaw --policy policies/base-policy.yaml --wait
+# Apply (also done automatically by start.sh)
+openshell policy set openclaw --policy policies/policy.yaml --wait
 
 # Check active policy
 openshell policy get openclaw
-
-# Temporarily extend for a dev task, then revert
-openshell policy set openclaw --policy policies/extended-policy.yaml --wait
-# ... do work ...
-openshell policy set openclaw --policy policies/base-policy.yaml --wait
 ```
 
 ### Generating Custom Policies
@@ -42,7 +36,3 @@ git clone https://github.com/NVIDIA/OpenShell.git _openshell-src
 ```
 
 Or describe what you need in plain English: `openshell sandbox connect openclaw` then ask the agent to generate a policy.
-
-### Security Principle
-
-**Start with `base-policy.yaml`.** Only widen access when necessary, for the duration it's needed. Narrow back when done. All policy changes are logged by OpenShell.

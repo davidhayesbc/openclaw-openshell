@@ -327,6 +327,19 @@ if model_names and cfg.get('models', {}).get('providers', {}).get('ollama'):
         }
         for name in model_names
     ]
+
+    # Register each model in agents.defaults.models so the web UI lists them.
+    # Key format: "ollama/<model-id>", alias: model name without tag/version.
+    cfg.setdefault('agents', {}).setdefault('defaults', {}).setdefault('models', {})
+    agent_models = cfg['agents']['defaults']['models']
+    # Remove stale ollama entries from a previous run
+    for k in list(agent_models.keys()):
+        if k.startswith('ollama/'):
+            del agent_models[k]
+    for name in model_names:
+        alias = name.split(':')[0].split('/')[-1]  # e.g. "phi3.5:latest" → "phi3.5"
+        agent_models[f'ollama/{name}'] = {'alias': alias}
+
     with open(config_file, 'w') as f:
         json.dump(cfg, f, indent=2)
     print('updated:' + ','.join(model_names))
@@ -365,7 +378,7 @@ cat config/openclaw.json \
   | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
       env \
         OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN}" \
-        OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-}" \
+        OLLAMA_BASE_URL="${OLLAMA_SANDBOX_URL:-${OLLAMA_BASE_URL:-}}" \
         LMSTUDIO_BASE_URL="${LMSTUDIO_BASE_URL:-}" \
         LM_API_TOKEN="${LM_API_TOKEN:-}" \
         OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
@@ -509,25 +522,40 @@ sleep 2
 # To stop: kill the PID in GW_EXEC_PID_FILE (terminates the exec session,
 # which signals the gateway inside the sandbox).
 # ---------------------------------------------------------------------------
-log "Starting openclaw gateway (persistent exec session)..."
+
+# If the gateway is already responding (previous run left it running and the
+# SSH tunnel is back up), skip re-launching to avoid the "already running" error.
 GW_EXEC_LOG="/tmp/openclaw-gw-exec.log"
-nohup openshell sandbox exec \
-  --name "${SANDBOX_NAME}" \
-  -- env \
-    NODE_OPTIONS="--require /tmp/patch-net.cjs" \
-    TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
-    OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
-    LM_API_TOKEN="${LM_API_TOKEN:-}" \
-    openclaw gateway run \
-  > "${GW_EXEC_LOG}" 2>&1 &
-GW_EXEC_PID=$!
-echo "${GW_EXEC_PID}" > "${GW_EXEC_PID_FILE}"
-log "Gateway exec PID ${GW_EXEC_PID} (log: ${GW_EXEC_LOG})"
+if curl -sf --max-time 3 "http://127.0.0.1:${GATEWAY_PORT}/healthz" > /dev/null 2>&1; then
+  log "Gateway already healthy on port ${GATEWAY_PORT} — skipping launch."
+else
+  # Stop any gateway process still running inside the sandbox from a previous
+  # exec session (the gateway daemonizes and outlives the host-side exec PID).
+  log "Stopping any existing gateway inside sandbox..."
+  openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc \
+    'pkill -f "openclaw gateway" 2>/dev/null; rm -f ~/.openclaw/gateway.pid; true' \
+    2>/dev/null || true
+  sleep 1
+
+  log "Starting openclaw gateway (persistent exec session)..."
+  nohup openshell sandbox exec \
+    --name "${SANDBOX_NAME}" \
+    -- env \
+      NODE_OPTIONS="--require /tmp/patch-net.cjs" \
+      TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
+      OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
+      LM_API_TOKEN="${LM_API_TOKEN:-}" \
+      openclaw gateway run \
+    > "${GW_EXEC_LOG}" 2>&1 &
+  GW_EXEC_PID=$!
+  echo "${GW_EXEC_PID}" > "${GW_EXEC_PID_FILE}"
+  log "Gateway exec PID ${GW_EXEC_PID} (log: ${GW_EXEC_LOG})"
+fi
 
 # ---------------------------------------------------------------------------
 # Step 8: Apply security policy (deny-all except LLM APIs)
 # ---------------------------------------------------------------------------
-POLICY_FILE="${OPENSHELL_POLICY_FILE:-policies/base-policy.yaml}"
+POLICY_FILE="${OPENSHELL_POLICY_FILE:-policies/policy.yaml}"
 
 log "Applying security policy from ${POLICY_FILE}..."
 openshell policy set "${SANDBOX_NAME}" \
@@ -535,13 +563,6 @@ openshell policy set "${SANDBOX_NAME}" \
   --wait \
 && log "Policy applied from ${POLICY_FILE}." \
 || warn "Policy apply failed. Run manually: openshell policy set ${SANDBOX_NAME} --policy ${POLICY_FILE} --wait"
-
-if [[ "${POLICY_FILE}" == "policies/base-policy.yaml" ]] \
-  && command -v node >/dev/null 2>&1 \
-  && node -e 'const fs=require("fs"); const cfg=JSON.parse(fs.readFileSync("config/openclaw.json","utf8")); process.exit(cfg?.channels?.telegram?.enabled ? 0 : 1)' >/dev/null 2>&1; then
-  warn "Telegram is enabled in config/openclaw.json but base policy is active."
-  warn "If Telegram messages do not flow, export OPENSHELL_POLICY_FILE=policies/extended-policy.yaml and restart."
-fi
 
 # ---------------------------------------------------------------------------
 # Step 9: Wait for gateway to become healthy
@@ -571,8 +592,7 @@ log "Control UI:  http://127.0.0.1:${GATEWAY_PORT}/"
 log "Health:      curl http://127.0.0.1:${GATEWAY_PORT}/healthz"
 log "Gateway log: ${GW_EXEC_LOG}"
 log ""
-log "To extend policy:  openshell policy set ${SANDBOX_NAME} --policy policies/extended-policy.yaml --wait"
-log "To revert policy:  openshell policy set ${SANDBOX_NAME} --policy policies/base-policy.yaml --wait"
+log "Policy:      openshell policy set ${SANDBOX_NAME} --policy policies/policy.yaml --wait"
 log ""
 log "Monitor:  scripts/monitor.sh"
 log "Audit:    scripts/audit.sh"
