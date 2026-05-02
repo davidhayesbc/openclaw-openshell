@@ -374,6 +374,9 @@ openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'mkdir -p "$HOME/.op
 # sandbox. config/openclaw.json sets auth.mode="token" but deliberately omits
 # the token value (it's a secret). We merge inside the sandbox via node so
 # startup does not depend on host-side node being installed.
+# GATEWAY_HOST_IP: the WSL/host IP detected at start time, added to
+# controlUi.allowedOrigins so the Windows browser can access the UI.
+_GATEWAY_HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 cat config/openclaw.json \
   | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
       env \
