@@ -368,14 +368,13 @@ fi
 # overwrite it with the repo-managed config so channel and model settings from
 # config/openclaw.json actually apply to the running gateway.
 # ---------------------------------------------------------------------------
-log "Syncing repo config into sandbox OpenClaw home..."
+log "Syncing repo config into sandbox OpenClaw home (merge mode)..."
 openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'mkdir -p "$HOME/.openclaw"'
-# Inject the gateway token from .env into the config before writing it to the
-# sandbox. config/openclaw.json sets auth.mode="token" but deliberately omits
-# the token value (it's a secret). We merge inside the sandbox via node so
-# startup does not depend on host-side node being installed.
-# GATEWAY_HOST_IP: the WSL/host IP detected at start time, added to
-# controlUi.allowedOrigins so the Windows browser can access the UI.
+# Merge strategy: use the existing sandbox config as the base if it already
+# exists (preserving UI-saved changes such as model selection), and fall back
+# to the repo config only on first run.  The repo config (stdin) is still used
+# to sync provider definitions, models lists, and gateway.controlUi. Secrets
+# and sandbox-specific URLs are always injected from env vars regardless.
 _GATEWAY_HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 cat config/openclaw.json \
   | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
@@ -385,7 +384,7 @@ cat config/openclaw.json \
         LMSTUDIO_BASE_URL="${LMSTUDIO_BASE_URL:-}" \
         LM_API_TOKEN="${LM_API_TOKEN:-}" \
         OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
-        node -e 'let raw="";process.stdin.setEncoding("utf8");process.stdin.on("data",(chunk)=>{raw+=chunk;});process.stdin.on("end",()=>{const cfg=JSON.parse(raw);cfg.gateway=cfg.gateway||{};cfg.gateway.auth=cfg.gateway.auth||{};cfg.gateway.auth.token=process.env.OPENCLAW_GATEWAY_TOKEN;const ollamaBaseUrl=process.env.OLLAMA_BASE_URL;if(ollamaBaseUrl&&cfg.models&&cfg.models.providers&&cfg.models.providers.ollama){cfg.models.providers.ollama.baseUrl=ollamaBaseUrl;}const lmstudioBaseUrl=process.env.LMSTUDIO_BASE_URL;if(lmstudioBaseUrl&&cfg.models&&cfg.models.providers&&cfg.models.providers.lmstudio){cfg.models.providers.lmstudio.baseUrl=lmstudioBaseUrl;}const lmApiToken=process.env.LM_API_TOKEN;if(lmApiToken&&cfg.models&&cfg.models.providers&&cfg.models.providers.lmstudio){cfg.models.providers.lmstudio.apiKey=lmApiToken;}const openrouterKey=process.env.OPENROUTER_API_KEY;if(openrouterKey&&cfg.models&&cfg.models.providers&&cfg.models.providers.openai){cfg.models.providers.openai.apiKey=openrouterKey;}process.stdout.write(JSON.stringify(cfg,null,2));});' \
+        node -e 'let raw="";process.stdin.setEncoding("utf8");process.stdin.on("data",(c)=>{raw+=c;});process.stdin.on("end",()=>{const fs=require("fs");const rc=JSON.parse(raw);const sp=(process.env.HOME||"/sandbox")+"/.openclaw/openclaw.json";let cfg;try{cfg=JSON.parse(fs.readFileSync(sp,"utf8"));}catch(e){cfg=JSON.parse(raw);}cfg.gateway=cfg.gateway||{};cfg.gateway.auth=cfg.gateway.auth||{};cfg.gateway.auth.token=process.env.OPENCLAW_GATEWAY_TOKEN;if(rc.gateway&&rc.gateway.controlUi)cfg.gateway.controlUi=rc.gateway.controlUi;if(!cfg.models)cfg.models={};if(!cfg.models.providers)cfg.models.providers={};for(const[k,v]of Object.entries(rc.models&&rc.models.providers||{})){if(!cfg.models.providers[k])cfg.models.providers[k]=v;else{cfg.models.providers[k].api=v.api;cfg.models.providers[k].models=v.models;}}const ou=process.env.OLLAMA_BASE_URL;if(ou&&cfg.models.providers.ollama)cfg.models.providers.ollama.baseUrl=ou;const lu=process.env.LMSTUDIO_BASE_URL;if(lu&&cfg.models.providers.lmstudio)cfg.models.providers.lmstudio.baseUrl=lu;const lt=process.env.LM_API_TOKEN;if(lt&&cfg.models.providers.lmstudio)cfg.models.providers.lmstudio.apiKey=lt;const ok=process.env.OPENROUTER_API_KEY;if(ok&&cfg.models.providers.openai)cfg.models.providers.openai.apiKey=ok;if(!cfg.agents)cfg.agents={};if(!cfg.agents.defaults)cfg.agents.defaults={};if(rc.agents&&rc.agents.defaults&&rc.agents.defaults.models)cfg.agents.defaults.models=rc.agents.defaults.models;if(!cfg.agents.defaults.model&&rc.agents&&rc.agents.defaults&&rc.agents.defaults.model)cfg.agents.defaults.model=rc.agents.defaults.model;process.stdout.write(JSON.stringify(cfg,null,2));});' \
   | openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'cat > "$HOME/.openclaw/openclaw.json"'
 openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc \
   'test -s "$HOME/.openclaw/openclaw.json" && echo config_synced' \
