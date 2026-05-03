@@ -125,27 +125,41 @@ warn() { echo "[gw-inner] WARN: $*" >&2; }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ALWAYS: provider routing (sandbox-specific URLs and API secrets)
+# Must set entire provider objects atomically — field-by-field causes validation
+# failures because openclaw config set validates the entire config on each call.
 # ──────────────────────────────────────────────────────────────────────────────
 log "Configuring providers..."
 
-# Ollama (local inference via inference.local)
-openclaw config set models.providers.ollama.api     openai-completions
-openclaw config set models.providers.ollama.baseUrl "${OLLAMA_SANDBOX_URL}"
-openclaw config set models.providers.ollama.apiKey  unused
-openclaw config set models.providers.ollama.models  "${OLLAMA_MODELS_JSON}"
+# Ollama (local inference via inference.local) — set as complete object
+_OLLAMA_PROVIDER=$(node -e "process.stdout.write(JSON.stringify({
+  api: 'openai-completions',
+  baseUrl: process.env.OLLAMA_SANDBOX_URL,
+  apiKey: 'unused',
+  models: JSON.parse(process.env.OLLAMA_MODELS_JSON || '[]')
+}))")
+openclaw config set models.providers.ollama "$_OLLAMA_PROVIDER"
 
 # OpenRouter (cloud fallback — skip if no API key)
 if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
-  openclaw config set models.providers.openai.api     openai-completions
-  openclaw config set models.providers.openai.baseUrl https://openrouter.ai/api/v1
-  openclaw config set models.providers.openai.apiKey  "${OPENROUTER_API_KEY}"
+  _OPENROUTER_PROVIDER=$(node -e "process.stdout.write(JSON.stringify({
+    api: 'openai-completions',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    apiKey: process.env.OPENROUTER_API_KEY,
+    models: []
+  }))")
+  openclaw config set models.providers.openai "$_OPENROUTER_PROVIDER"
 fi
 
 # LM Studio (optional local provider)
-openclaw config set models.providers.lmstudio.api     openai-completions
-openclaw config set models.providers.lmstudio.baseUrl "${LMSTUDIO_BASE_URL}"
-[[ -n "${LM_API_TOKEN:-}" ]] && \
-  openclaw config set models.providers.lmstudio.apiKey "${LM_API_TOKEN}"
+if [[ -n "${LMSTUDIO_BASE_URL:-}" ]]; then
+  _LMSTUDIO_PROVIDER=$(node -e "process.stdout.write(JSON.stringify({
+    api: 'openai-completions',
+    baseUrl: process.env.LMSTUDIO_BASE_URL,
+    apiKey: process.env.LM_API_TOKEN || null,
+    models: []
+  }))")
+  openclaw config set models.providers.lmstudio "$_LMSTUDIO_PROVIDER"
+fi
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ALWAYS: model aliases (rebuilt from fresh Ollama discovery)
@@ -160,7 +174,7 @@ if [[ "${SETUP_MODE}" == "full" ]]; then
   log "Applying full structural configuration..."
 
   # Gateway
-  openclaw config set gateway.mode loopback
+  openclaw config set gateway.mode local
   openclaw config set gateway.bind loopback
   openclaw config set gateway.controlUi.allowedOrigins \
     '["http://localhost:18789","http://127.0.0.1:18789"]'
