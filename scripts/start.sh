@@ -65,9 +65,10 @@ log "Checking openclaw:local image..."
 docker image inspect openclaw:local >/dev/null 2>&1 \
   || die "Docker image 'openclaw:local' not found. Run scripts/update.sh first."
 
-# Verify repo config exists
+# Verify repo config reference exists (setup-gateway.sh is the authoritative config;
+# config/openclaw.json is kept as a reference / for install.sh seeding)
 [[ -f config/openclaw.json ]] \
-  || die "config/openclaw.json not found. Run scripts/install.sh first."
+  || warn "config/openclaw.json not found — gateway will use setup-gateway.sh defaults only."
 
 # ---------------------------------------------------------------------------
 # Validate OpenShell gateway connectivity
@@ -278,118 +279,22 @@ openshell sandbox exec --name "${SANDBOX_NAME}" -- \
   || die "openclaw onboard failed inside sandbox. Check sandbox connectivity and that openclaw is installed in the image."
 
 # ---------------------------------------------------------------------------
-# Step 5b-pre: Enumerate available Ollama models → update config/openclaw.json
+# Step 5b: Declarative gateway configuration via openclaw CLI
 #
-# Queries /api/tags on the Ollama server (OLLAMA_BASE_URL env var, or the
-# baseUrl already set in config/openclaw.json) and rewrites the
-# models.providers.ollama.models array so the running gateway sees every
-# locally available model. Failures are non-fatal: the existing list is kept.
-# ---------------------------------------------------------------------------
-_OLLAMA_QUERY_URL="${OLLAMA_BASE_URL:-}"
-if [[ -z "${_OLLAMA_QUERY_URL}" ]]; then
-  _OLLAMA_QUERY_URL=$(python3 -c "
-import json, sys
-try:
-    cfg = json.load(open('config/openclaw.json'))
-    print(cfg.get('models',{}).get('providers',{}).get('ollama',{}).get('baseUrl',''))
-except Exception:
-    pass
-" 2>/dev/null || true)
-fi
-
-if [[ -n "${_OLLAMA_QUERY_URL}" ]]; then
-  log "Enumerating Ollama models from ${_OLLAMA_QUERY_URL}..."
-  _OLLAMA_TAGS_TMP=$(mktemp)
-  if curl -sf --max-time 8 "${_OLLAMA_QUERY_URL}/api/tags" > "${_OLLAMA_TAGS_TMP}" 2>/dev/null \
-      && [[ -s "${_OLLAMA_TAGS_TMP}" ]]; then
-    _OLLAMA_RESULT=$(python3 - "${_OLLAMA_TAGS_TMP}" config/openclaw.json <<'PYEOF'
-import json, sys
-
-tags_file, config_file = sys.argv[1], sys.argv[2]
-with open(tags_file) as f:
-    tags = json.load(f)
-with open(config_file) as f:
-    cfg = json.load(f)
-
-model_names = [
-    m.get('name') or m.get('model', '')
-    for m in tags.get('models', [])
-]
-model_names = [n for n in model_names if n]
-
-if model_names and cfg.get('models', {}).get('providers', {}).get('ollama'):
-    cfg['models']['providers']['ollama']['models'] = [
-        {
-            'id': name, 'name': name,
-            'input': ['text'], 'reasoning': False,
-            'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0},
-            'contextWindow': 131072, 'maxTokens': 8192
-        }
-        for name in model_names
-    ]
-
-    # Register each model in agents.defaults.models so the web UI lists them.
-    # Key format: "ollama/<model-id>", alias: model name without tag/version.
-    cfg.setdefault('agents', {}).setdefault('defaults', {}).setdefault('models', {})
-    agent_models = cfg['agents']['defaults']['models']
-    # Remove stale ollama entries from a previous run
-    for k in list(agent_models.keys()):
-        if k.startswith('ollama/'):
-            del agent_models[k]
-    for name in model_names:
-        alias = name.split(':')[0].split('/')[-1]  # e.g. "phi3.5:latest" → "phi3.5"
-        agent_models[f'ollama/{name}'] = {'alias': alias}
-
-    with open(config_file, 'w') as f:
-        json.dump(cfg, f, indent=2)
-    print('updated:' + ','.join(model_names))
-else:
-    print('skipped')
-PYEOF
-    2>/dev/null || true)
-    if [[ "${_OLLAMA_RESULT}" == updated:* ]]; then
-      _OLLAMA_MODEL_LIST="${_OLLAMA_RESULT#updated:}"
-      log "Ollama models written to config/openclaw.json: ${_OLLAMA_MODEL_LIST}"
-    else
-      warn "Ollama model discovery returned no models — keeping existing list."
-    fi
-  else
-    warn "Could not reach Ollama at ${_OLLAMA_QUERY_URL}/api/tags — keeping existing model list."
-  fi
-  rm -f "${_OLLAMA_TAGS_TMP}"
-else
-  warn "No Ollama base URL configured — skipping model discovery."
-fi
-
-# ---------------------------------------------------------------------------
-# Step 5b: Sync committed gateway config into the sandbox
+# Replaces the old JSON-patching / merge approach with scripts/setup-gateway.sh,
+# which uses `openclaw config set`, `openclaw models`, `openclaw agents`, and
+# `openclaw channels` to configure the gateway.
 #
-# The onboard step seeds ~/.openclaw/openclaw.json inside the sandbox. We then
-# overwrite it with the repo-managed config so channel and model settings from
-# config/openclaw.json actually apply to the running gateway.
+# Auto-detects mode:
+#   --full   (first run, no sentinel)  — applies complete configuration
+#   --update (sentinel present)        — re-applies only secrets, provider
+#            URLs, and the Ollama models list; preserves user settings
+#
+# To force a full reconfiguration after editing setup-gateway.sh:
+#   bash scripts/setup-gateway.sh --reset && bash scripts/start.sh
 # ---------------------------------------------------------------------------
-log "Syncing repo config into sandbox OpenClaw home (merge mode)..."
-openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'mkdir -p "$HOME/.openclaw"'
-# Merge strategy: use the existing sandbox config as the base if it already
-# exists (preserving UI-saved changes such as model selection), and fall back
-# to the repo config only on first run.  The repo config (stdin) is still used
-# to sync provider definitions, models lists, and gateway.controlUi. Secrets
-# and sandbox-specific URLs are always injected from env vars regardless.
-_GATEWAY_HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-cat config/openclaw.json \
-  | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
-      env \
-        OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN}" \
-        OLLAMA_BASE_URL="${OLLAMA_SANDBOX_URL:-${OLLAMA_BASE_URL:-}}" \
-        LMSTUDIO_BASE_URL="${LMSTUDIO_BASE_URL:-}" \
-        LM_API_TOKEN="${LM_API_TOKEN:-}" \
-        OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
-        node -e 'let raw="";process.stdin.setEncoding("utf8");process.stdin.on("data",(c)=>{raw+=c;});process.stdin.on("end",()=>{const fs=require("fs");const rc=JSON.parse(raw);const sp=(process.env.HOME||"/sandbox")+"/.openclaw/openclaw.json";let cfg;try{cfg=JSON.parse(fs.readFileSync(sp,"utf8"));}catch(e){cfg=JSON.parse(raw);}cfg.gateway=cfg.gateway||{};cfg.gateway.auth=cfg.gateway.auth||{};cfg.gateway.auth.token=process.env.OPENCLAW_GATEWAY_TOKEN;if(rc.gateway&&rc.gateway.controlUi)cfg.gateway.controlUi=rc.gateway.controlUi;if(!cfg.models)cfg.models={};if(!cfg.models.providers)cfg.models.providers={};for(const[k,v]of Object.entries(rc.models&&rc.models.providers||{})){if(!cfg.models.providers[k])cfg.models.providers[k]=v;else{cfg.models.providers[k].api=v.api;cfg.models.providers[k].models=v.models;}}const ou=process.env.OLLAMA_BASE_URL;if(ou&&cfg.models.providers.ollama)cfg.models.providers.ollama.baseUrl=ou;const lu=process.env.LMSTUDIO_BASE_URL;if(lu&&cfg.models.providers.lmstudio)cfg.models.providers.lmstudio.baseUrl=lu;const lt=process.env.LM_API_TOKEN;if(lt&&cfg.models.providers.lmstudio)cfg.models.providers.lmstudio.apiKey=lt;const ok=process.env.OPENROUTER_API_KEY;if(ok&&cfg.models.providers.openai)cfg.models.providers.openai.apiKey=ok;if(!cfg.agents)cfg.agents={};if(!cfg.agents.defaults)cfg.agents.defaults={};if(rc.agents&&rc.agents.defaults&&rc.agents.defaults.models)cfg.agents.defaults.models=rc.agents.defaults.models;if(!cfg.agents.defaults.model&&rc.agents&&rc.agents.defaults&&rc.agents.defaults.model)cfg.agents.defaults.model=rc.agents.defaults.model;process.stdout.write(JSON.stringify(cfg,null,2));});' \
-  | openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc 'cat > "$HOME/.openclaw/openclaw.json"'
-openshell sandbox exec --name "${SANDBOX_NAME}" -- bash -lc \
-  'test -s "$HOME/.openclaw/openclaw.json" && echo config_synced' \
-  | grep -q "config_synced" \
-  || die "Failed to sync config/openclaw.json into sandbox — config file missing or empty."
+bash scripts/setup-gateway.sh \
+  || die "setup-gateway.sh failed. Check output above and fix before retrying."
 
 # ---------------------------------------------------------------------------
 # Step 5c: Sync agent workspace files into the sandbox
