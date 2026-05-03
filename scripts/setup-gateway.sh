@@ -96,11 +96,15 @@ fi
 
 log "Mode: $MODE"
 
-# ── Ollama model discovery (host-side, using OLLAMA_BASE_URL not sandbox URL) ─
+# ── Local LLM model discovery (host-side) ──────────────────────────────────────
+# Discovers models from both Ollama and LM Studio providers
 _OLLAMA_MODELS_JSON='[]'
+_LMSTUDIO_MODELS_JSON='[]'
 _AGENTS_DEFAULTS_MODELS_JSON='{}'
 _HOST_OLLAMA_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+_HOST_LMSTUDIO_URL="${LMSTUDIO_BASE_URL:-http://127.0.0.1:1234/v1}"
 
+# ─ Ollama discovery
 log "Enumerating Ollama models from ${_HOST_OLLAMA_URL}..."
 _OLLAMA_TAGS_TMP=$(mktemp)
 if curl -sf --max-time 8 "${_HOST_OLLAMA_URL}/api/tags" > "$_OLLAMA_TAGS_TMP" 2>/dev/null \
@@ -132,6 +136,41 @@ else
   warn "Could not reach Ollama at ${_HOST_OLLAMA_URL} — keeping empty model list"
 fi
 rm -f "$_OLLAMA_TAGS_TMP"
+
+# ─ LM Studio discovery
+log "Enumerating LM Studio models from ${_HOST_LMSTUDIO_URL}..."
+_LMSTUDIO_MODELS_TMP=$(mktemp)
+if curl -sf --max-time 8 "${_HOST_LMSTUDIO_URL}/models" > "$_LMSTUDIO_MODELS_TMP" 2>/dev/null \
+    && [[ -s "$_LMSTUDIO_MODELS_TMP" ]]; then
+  _LMSTUDIO_DISCOVERY=$(python3 - "$_LMSTUDIO_MODELS_TMP" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+models, aliases = [], {}
+for m in data.get('data', []):
+    model_id = m.get('id', '')
+    if not model_id:
+        continue
+    models.append({
+        'id': model_id, 'name': model_id, 'input': ['text'], 'reasoning': False,
+        'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0},
+        'contextWindow': 131072, 'maxTokens': 8192,
+    })
+    alias = model_id.split('/')[-1].split(':')[0]
+    aliases[f'lmstudio/{model_id}'] = {'alias': alias}
+print(json.dumps({'models': models, 'aliases': aliases}))
+PYEOF
+  )
+  _LMSTUDIO_MODELS_JSON=$(echo "$_LMSTUDIO_DISCOVERY" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['models']))")
+  _LMSTUDIO_ALIASES=$(echo "$_LMSTUDIO_DISCOVERY" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['aliases']))")
+  # Merge LM Studio aliases into agents defaults
+  _AGENTS_DEFAULTS_MODELS_JSON=$(python3 -c "import sys,json; a=json.loads('''$_AGENTS_DEFAULTS_MODELS_JSON'''); b=json.loads('''$_LMSTUDIO_ALIASES'''); a.update(b); print(json.dumps(a))")
+  _COUNT=$(echo "$_LMSTUDIO_MODELS_JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
+  log "Discovered ${_COUNT} LM Studio models"
+else
+  warn "Could not reach LM Studio at ${_HOST_LMSTUDIO_URL} — keeping empty model list"
+fi
+rm -f "$_LMSTUDIO_MODELS_TMP"
 
 # ── Generate inner setup script ──────────────────────────────────────────────
 # This script runs inside the sandbox via `bash -s`.
@@ -172,13 +211,13 @@ if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
   openclaw config set models.providers.openai "$_OPENROUTER_PROVIDER"
 fi
 
-# LM Studio (optional local provider)
+# LM Studio (optional local provider with GPU acceleration)
 if [[ -n "${LMSTUDIO_BASE_URL:-}" ]]; then
   _LMSTUDIO_PROVIDER=$(node -e "process.stdout.write(JSON.stringify({
     api: 'openai-completions',
     baseUrl: process.env.LMSTUDIO_BASE_URL,
     apiKey: process.env.LM_API_TOKEN || null,
-    models: []
+    models: JSON.parse(process.env.LMSTUDIO_MODELS_JSON || '[]')
   }))")
   openclaw config set models.providers.lmstudio "$_LMSTUDIO_PROVIDER"
 fi
@@ -288,6 +327,7 @@ printf '%s\n' "$_INNER" \
         SAVED_MODEL_JSON="${_SAVED_MODEL_JSON}" \
         OLLAMA_SANDBOX_URL="${OLLAMA_SANDBOX_URL:-https://inference.local/v1}" \
         OLLAMA_MODELS_JSON="${_OLLAMA_MODELS_JSON}" \
+        LMSTUDIO_MODELS_JSON="${_LMSTUDIO_MODELS_JSON}" \
         AGENTS_DEFAULTS_MODELS_JSON="${_AGENTS_DEFAULTS_MODELS_JSON}" \
         OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
         LMSTUDIO_BASE_URL="${LMSTUDIO_BASE_URL:-http://127.0.0.1:1234/v1}" \
