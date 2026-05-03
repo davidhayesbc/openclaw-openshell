@@ -13,7 +13,7 @@
 #   structural change to propagate it to the sandbox.
 #
 # Usage:
-#   source .env && bash scripts/setup-gateway.sh [--full|--update|--reset]
+#   source .env && bash scripts/setup-gateway.sh [--full|--update|--reset] [--saved-model JSON]
 #
 # Modes:
 #   --full    Apply complete configuration.  Idempotent: safe to re-run; the
@@ -29,8 +29,12 @@
 #
 #   (none)    Auto-detect: --full if no sentinel found, --update otherwise.
 #
+# Options:
+#   --saved-model JSON  Model config to restore after onboard wipes it.
+#                       Passed by start.sh to preserve user's model selection.
+#
 # Called by:
-#   scripts/start.sh  (Step 5b) after openclaw onboard and before gateway
+#   scripts/start.sh  (Step 5c) after openclaw onboard and before gateway
 #   launch.  Can also be run standalone: source .env && bash scripts/setup-gateway.sh
 # =============================================================================
 set -euo pipefail
@@ -45,8 +49,26 @@ die()  { echo "[setup-gw] ERROR: $*" >&2; exit 1; }
 SANDBOX_NAME="${OPENSHELL_SANDBOX_NAME:-openclaw}"
 SENTINEL='~/.openclaw/.setup-done'
 
-# ── Mode detection ───────────────────────────────────────────────────────────
-_RAW_MODE="${1:-auto}"
+# ── Parse arguments ──────────────────────────────────────────────────────────
+_SAVED_MODEL_JSON=""
+_ARGS=("$@")
+_RAW_MODE="auto"
+
+for _arg in "${_ARGS[@]}"; do
+  case "$_arg" in
+    --saved-model)
+      # Next arg is the JSON
+      ;;
+    --full|--update|--reset|auto)
+      _RAW_MODE="$_arg"
+      ;;
+    *)
+      # Assume it's JSON from --saved-model
+      _SAVED_MODEL_JSON="$_arg"
+      ;;
+  esac
+done
+
 case "$_RAW_MODE" in
   --full)   MODE=full ;;
   --update) MODE=update ;;
@@ -222,9 +244,24 @@ if [[ "${SETUP_MODE}" == "full" ]]; then
   fi
 
   # Primary model — preserve existing user selection; only set on first run
+  # Try to restore from saved model (passed by start.sh before onboard wiped it)
+  _saved_primary=""
+  if [[ -n "${SAVED_MODEL_JSON:-}" ]]; then
+    _saved_primary=$(echo "${SAVED_MODEL_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('primary',''))" 2>/dev/null || true)
+  fi
+  
   _current=$(openclaw config get agents.defaults.model.primary 2>/dev/null \
     | tr -d '"' | xargs 2>/dev/null || true)
-  if [[ -z "$_current" || "$_current" == "null" || "$_current" == "undefined" ]]; then
+  
+  if [[ -n "$_saved_primary" && "$_saved_primary" != "null" ]]; then
+    log "Restoring saved primary model: $_saved_primary"
+    openclaw config set agents.defaults.model.primary "$_saved_primary"
+    # Also restore fallbacks if they were saved
+    _saved_fallbacks=$(echo "${SAVED_MODEL_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d.get('fallbacks',[])))" 2>/dev/null || true)
+    if [[ -n "$_saved_fallbacks" && "$_saved_fallbacks" != "null" ]]; then
+      openclaw config set agents.defaults.model.fallbacks "$_saved_fallbacks"
+    fi
+  elif [[ -z "$_current" || "$_current" == "null" || "$_current" == "undefined" ]]; then
     log "Setting initial primary model: ${DEFAULT_MODEL}"
     openclaw config set agents.defaults.model.primary "${DEFAULT_MODEL}"
     openclaw config set agents.defaults.model.fallbacks \
@@ -248,6 +285,7 @@ printf '%s\n' "$_INNER" \
   | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
       env \
         SETUP_MODE="${MODE}" \
+        SAVED_MODEL_JSON="${_SAVED_MODEL_JSON}" \
         OLLAMA_SANDBOX_URL="${OLLAMA_SANDBOX_URL:-https://inference.local/v1}" \
         OLLAMA_MODELS_JSON="${_OLLAMA_MODELS_JSON}" \
         AGENTS_DEFAULTS_MODELS_JSON="${_AGENTS_DEFAULTS_MODELS_JSON}" \

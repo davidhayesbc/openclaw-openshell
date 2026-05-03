@@ -259,7 +259,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: Onboard openclaw (non-interactive — writes ~/.openclaw/openclaw.json)
+# Step 5a: Save user's model selection (if it exists) before onboard wipes it
+# ---------------------------------------------------------------------------
+_SAVED_MODEL_JSON=$(openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+  bash -c 'openclaw config get agents.defaults.model 2>/dev/null || echo "{}"' 2>/dev/null || echo "{}")
+
+# ---------------------------------------------------------------------------
+# Step 5b: Onboard openclaw (non-interactive — writes ~/.openclaw/openclaw.json)
 #
 # Tokens are passed inline; the sandbox has no access to the host env.
 # ---------------------------------------------------------------------------
@@ -279,7 +285,7 @@ openshell sandbox exec --name "${SANDBOX_NAME}" -- \
   || die "openclaw onboard failed inside sandbox. Check sandbox connectivity and that openclaw is installed in the image."
 
 # ---------------------------------------------------------------------------
-# Step 5b: Declarative gateway configuration via openclaw CLI
+# Step 5c: Declarative gateway configuration via openclaw CLI
 #
 # Replaces the old JSON-patching / merge approach with scripts/setup-gateway.sh,
 # which uses `openclaw config set`, `openclaw models`, `openclaw agents`, and
@@ -293,7 +299,7 @@ openshell sandbox exec --name "${SANDBOX_NAME}" -- \
 # To force a full reconfiguration after editing setup-gateway.sh:
 #   bash scripts/setup-gateway.sh --reset && bash scripts/start.sh
 # ---------------------------------------------------------------------------
-bash scripts/setup-gateway.sh \
+bash scripts/setup-gateway.sh --saved-model "${_SAVED_MODEL_JSON}" \
   || die "setup-gateway.sh failed. Check output above and fix before retrying."
 
 # ---------------------------------------------------------------------------
