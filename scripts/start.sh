@@ -329,7 +329,9 @@ fi
 # Step 5a: Save user's model selection (if it exists) before onboard wipes it
 # ---------------------------------------------------------------------------
 _SAVED_MODEL_JSON=$(openshell sandbox exec --name "${SANDBOX_NAME}" -- \
-  bash -c 'openclaw config get agents.defaults.model 2>/dev/null || echo "{}"' 2>/dev/null || echo "{}")
+  bash -c 'openclaw config get agents.defaults.model 2>/dev/null || echo "{}"' 2>/dev/null \
+  | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), separators=(",", ":")))' 2>/dev/null \
+  || echo "{}")
 
 # ---------------------------------------------------------------------------
 # Step 5b: Onboard openclaw (non-interactive — writes ~/.openclaw/openclaw.json)
