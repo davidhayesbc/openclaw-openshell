@@ -24,6 +24,53 @@ cd "$REPO_ROOT"
 log()  { echo "[start] $*"; }
 warn() { echo "[start] WARN: $*" >&2; }
 die()  { echo "[start] ERROR: $*" >&2; exit 1; }
+build_dotenv_env_args() {
+  local env_file="${1:-.env}"
+  local line name value
+  declare -g -a DOTENV_ENV_ARGS=()
+  declare -A _seen=()
+
+  [[ -f "$env_file" ]] || return 0
+
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+    if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)= ]]; then
+      name="${BASH_REMATCH[1]}"
+      [[ -n "${_seen[$name]+x}" ]] && continue
+      _seen["$name"]=1
+      if [[ -v $name ]]; then
+        value="${!name//$'\r'/}"
+        if [[ "$value" == *$'\n'* ]]; then
+          warn "Skipping ${name} for sandbox env injection because it contains a newline."
+          continue
+        fi
+        DOTENV_ENV_ARGS+=("${name}=${value}")
+      fi
+    fi
+  done < "$env_file"
+}
+start_gateway_with_retries() {
+  local log_file="$1"
+  local max_attempts="${2:-3}"
+  local attempt
+
+  for attempt in $(seq 1 "$max_attempts"); do
+    if openshell gateway start --port "${OPENSHELL_GATEWAY_PORT}" >>"$log_file" 2>&1; then
+      return 0
+    fi
+
+    if grep -qiE "Corrupted cluster state|K8s namespace not ready|container .* is restarting" "$log_file" 2>/dev/null; then
+      warn "Gateway start attempt ${attempt}/${max_attempts} hit transient cluster recovery; retrying..."
+      sleep 5
+      continue
+    fi
+
+    return 1
+  done
+
+  return 1
+}
 
 if [[ $# -gt 0 ]]; then
   die "Unsupported arguments: $*. Use scripts/start.sh with no arguments."
@@ -34,6 +81,7 @@ fi
 # ---------------------------------------------------------------------------
 [[ -f .env ]] || die ".env not found. Run scripts/install.sh first."
 set -o allexport; source .env; set +o allexport
+build_dotenv_env_args .env
 
 log "Validating environment..."
 bash scripts/validate-env.sh
@@ -93,7 +141,8 @@ docker image inspect "$OPENCLAW_IMAGE" >/dev/null 2>&1 \
 log "Checking OpenShell gateway..."
 if ! openshell gateway info >/dev/null 2>&1; then
   warn "OpenShell gateway is not reachable. Attempting to start it..."
-  if ! openshell gateway start --port "${OPENSHELL_GATEWAY_PORT}" > /tmp/openclaw-gateway-start.log 2>&1; then
+  : > /tmp/openclaw-gateway-start.log
+  if ! start_gateway_with_retries /tmp/openclaw-gateway-start.log; then
     tail -30 /tmp/openclaw-gateway-start.log >&2 || true
     die "OpenShell gateway failed to start. See /tmp/openclaw-gateway-start.log"
   fi
@@ -111,7 +160,7 @@ done
 if [[ "${GATEWAY_REACHABLE}" != true ]]; then
   warn "OpenShell gateway still unreachable. Recreating gateway..."
   openshell gateway destroy --name openshell > /tmp/openclaw-gateway-recover.log 2>&1 || true
-  if ! openshell gateway start --port "${OPENSHELL_GATEWAY_PORT}" >> /tmp/openclaw-gateway-recover.log 2>&1; then
+  if ! start_gateway_with_retries /tmp/openclaw-gateway-recover.log; then
     tail -30 /tmp/openclaw-gateway-recover.log >&2 || true
     die "OpenShell gateway recovery failed. See /tmp/openclaw-gateway-recover.log"
   fi
@@ -193,7 +242,8 @@ if [[ "${SANDBOX_EXISTS}" != true ]]; then
     fi
     if grep -qiE "Gateway .*not reachable|transport error|tls handshake|Connection reset|Connection refused" "${CREATE_LOG}"; then
       warn "Detected gateway connectivity error; restarting OpenShell gateway and retrying..."
-      openshell gateway start --port "${OPENSHELL_GATEWAY_PORT}" > /tmp/openclaw-gateway-start.log 2>&1 || true
+      : > /tmp/openclaw-gateway-start.log
+      start_gateway_with_retries /tmp/openclaw-gateway-start.log || true
     fi
     sleep 2
   done
@@ -288,17 +338,19 @@ _SAVED_MODEL_JSON=$(openshell sandbox exec --name "${SANDBOX_NAME}" -- \
 # ---------------------------------------------------------------------------
 log "Running openclaw onboard (non-interactive)..."
 openshell sandbox exec --name "${SANDBOX_NAME}" -- \
-  openclaw onboard \
-    --non-interactive \
-    --accept-risk \
-    --gateway-auth token \
-    --gateway-token "${OPENCLAW_GATEWAY_TOKEN}" \
-    --auth-choice "${OPENCLAW_AUTH_CHOICE}" \
-    --skip-channels \
-    --skip-daemon \
-    --skip-health \
-    --skip-search \
-    --skip-skills \
+  env \
+    "${DOTENV_ENV_ARGS[@]}" \
+    openclaw onboard \
+      --non-interactive \
+      --accept-risk \
+      --gateway-auth token \
+      --gateway-token "${OPENCLAW_GATEWAY_TOKEN}" \
+      --auth-choice "${OPENCLAW_AUTH_CHOICE}" \
+      --skip-channels \
+      --skip-daemon \
+      --skip-health \
+      --skip-search \
+      --skip-skills \
   || die "openclaw onboard failed inside sandbox. Check sandbox connectivity and that openclaw is installed in the image."
 
 # ---------------------------------------------------------------------------
@@ -452,10 +504,8 @@ else
   nohup openshell sandbox exec \
     --name "${SANDBOX_NAME}" \
     -- env \
+      "${DOTENV_ENV_ARGS[@]}" \
       NODE_OPTIONS="--require /tmp/patch-net.cjs" \
-      TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
-      OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
-      LM_API_TOKEN="${LM_API_TOKEN:-}" \
       openclaw gateway run \
     > "${GW_EXEC_LOG}" 2>&1 &
   GW_EXEC_PID=$!

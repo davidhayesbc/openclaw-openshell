@@ -45,9 +45,36 @@ cd "$REPO_ROOT"
 log()  { echo "[setup-gw] $*"; }
 warn() { echo "[setup-gw] WARN: $*" >&2; }
 die()  { echo "[setup-gw] ERROR: $*" >&2; exit 1; }
+build_dotenv_env_args() {
+  local env_file="${1:-.env}"
+  local line name value
+  declare -g -a DOTENV_ENV_ARGS=()
+  declare -A _seen=()
+
+  [[ -f "$env_file" ]] || return 0
+
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+    if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)= ]]; then
+      name="${BASH_REMATCH[1]}"
+      [[ -n "${_seen[$name]+x}" ]] && continue
+      _seen["$name"]=1
+      if [[ -v $name ]]; then
+        value="${!name//$'\r'/}"
+        if [[ "$value" == *$'\n'* ]]; then
+          warn "Skipping ${name} for sandbox env injection because it contains a newline."
+          continue
+        fi
+        DOTENV_ENV_ARGS+=("${name}=${value}")
+      fi
+    fi
+  done < "$env_file"
+}
 
 SANDBOX_NAME="${OPENSHELL_SANDBOX_NAME:-openclaw}"
 SENTINEL='~/.openclaw/.setup-done'
+build_dotenv_env_args .env
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
 _SAVED_MODEL_JSON=""
@@ -371,6 +398,7 @@ log "Running setup script inside sandbox..."
 printf '%s\n' "$_INNER" \
   | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
       env \
+        "${DOTENV_ENV_ARGS[@]}" \
         SETUP_MODE="${MODE}" \
         SAVED_MODEL_JSON="${_SAVED_MODEL_JSON}" \
         OPENCLAW_GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND:-loopback}" \
