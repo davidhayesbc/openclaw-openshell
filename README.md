@@ -45,7 +45,7 @@ A security-hardened, git-tracked setup for running [OpenClaw](https://openclaw.a
 git clone <this-repo> openclaw-openshell
 cd openclaw-openshell
 
-# Install OpenShell CLI and set up directories
+# Install OpenShell CLI, pull the published OpenClaw image, and set up directories
 bash scripts/install.sh
 
 # Edit .env with your API keys and a strong gateway token
@@ -215,7 +215,7 @@ scripts/stop.sh && scripts/start.sh
 bash scripts/update.sh --check     # Check for available updates
 bash scripts/update.sh             # Update all components
 bash scripts/update.sh --openshell # OpenShell CLI only
-bash scripts/update.sh --openclaw  # OpenClaw image only
+bash scripts/update.sh --openclaw  # Pull the latest configured OpenClaw image
 ```
 
 ## Rotating Credentials

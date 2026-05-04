@@ -2,11 +2,11 @@
 # =============================================================================
 # update.sh — Update OpenShell CLI and OpenClaw image
 # =============================================================================
-# Safely updates components with version awareness:
+# Updates components with version awareness:
 #   - Checks current versions before upgrading
 #   - Warns if OPENSHELL_VERSION is pinned to a specific version
-#   - Rebuilds Docker image from cloned source
-#   - Restarts services after update
+#   - Pulls the published OpenClaw sandbox image
+#   - Notes when the sandbox should be recreated after an update
 #
 # Usage:
 #   scripts/update.sh              # Update all components
@@ -32,6 +32,7 @@ fi
 
 SANDBOX_NAME="${OPENSHELL_SANDBOX_NAME:-openclaw}"
 OPENSHELL_VERSION="${OPENSHELL_VERSION:-latest}"
+OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-ghcr.io/nvidia/openshell-community/sandboxes/openclaw:latest}"
 
 update_openshell() {
   if ! command -v openshell >/dev/null 2>&1; then
@@ -60,18 +61,8 @@ update_openshell() {
 }
 
 update_openclaw() {
-  if [[ ! -d _openclaw-src ]]; then
-    log "Cloning openclaw/openclaw..."
-    git clone https://github.com/openclaw/openclaw.git _openclaw-src
-  else
-    log "Pulling latest openclaw/openclaw..."
-    git -C _openclaw-src fetch origin
-    git -C _openclaw-src checkout main 2>/dev/null || git -C _openclaw-src checkout -B main origin/main
-    git -C _openclaw-src reset --hard origin/main
-  fi
-
-  log "Rebuilding openclaw:local image..."
-  docker build -t openclaw:local _openclaw-src
+  log "Pulling OpenClaw sandbox image: ${OPENCLAW_IMAGE}"
+  docker pull "$OPENCLAW_IMAGE"
 
   if command -v openshell >/dev/null 2>&1 && \
      openshell sandbox list 2>/dev/null | grep -q "^${SANDBOX_NAME}"; then
@@ -90,10 +81,9 @@ check_only() {
     grep '"tag_name"' | cut -d'"' -f4 2>/dev/null || echo "unknown")
   log "OpenShell latest release: $LATEST_OS"
 
-  OPENCLAW_IMG=$(docker image inspect openclaw:local --format '{{.Created}}' 2>/dev/null || echo "not built")
-  log "openclaw:local image created: $OPENCLAW_IMG"
-  LATEST_CLAW=$(git -C _openclaw-src rev-parse --short HEAD 2>/dev/null || echo "not cloned")
-  log "openclaw/openclaw local HEAD: $LATEST_CLAW"
+  log "Configured OpenClaw image: ${OPENCLAW_IMAGE}"
+  OPENCLAW_IMG=$(docker image inspect "$OPENCLAW_IMAGE" --format '{{.Id}} (created {{.Created}})' 2>/dev/null || echo "not pulled")
+  log "Local OpenClaw image: $OPENCLAW_IMG"
 }
 
 case "$MODE" in

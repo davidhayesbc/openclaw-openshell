@@ -1,7 +1,7 @@
 # =============================================================================
 # OpenClaw Docker Compose — Security-Hardened Configuration
 # =============================================================================
-# Based on the official openclaw/openclaw docker-compose.yml with:
+# Based on the published OpenClaw image with:
 #   - Ports bound to 127.0.0.1 (loopback-only by default)
 #   - All capabilities dropped
 #   - no-new-privileges enforced
@@ -15,9 +15,8 @@
 #   scripts/validate-env.sh
 #   docker compose up -d
 #
-# To build the image first (required before first run):
-#   git clone https://github.com/openclaw/openclaw.git _openclaw-src
-#   cd _openclaw-src && docker build -t openclaw:local . && cd ..
+# To refresh the image:
+#   docker compose pull
 # =============================================================================
 
 networks:
@@ -31,7 +30,7 @@ networks:
 
 services:
   openclaw-gateway:
-    image: ${OPENCLAW_IMAGE:-openclaw:local}
+    image: ${OPENCLAW_IMAGE:-ghcr.io/nvidia/openshell-community/sandboxes/openclaw:latest}
 
     # Run as non-root node user
     user: "node"
@@ -125,7 +124,7 @@ services:
   # Not started by default; use: docker compose run --rm openclaw-cli <cmd>
   # -------------------------------------------------------------------------
   openclaw-cli:
-    image: ${OPENCLAW_IMAGE:-openclaw:local}
+    image: ${OPENCLAW_IMAGE:-ghcr.io/nvidia/openshell-community/sandboxes/openclaw:latest}
     profiles:
       - cli              # Only starts if: docker compose --profile cli run openclaw-cli
     user: "node"

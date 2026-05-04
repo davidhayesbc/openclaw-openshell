@@ -40,6 +40,23 @@ bash scripts/validate-env.sh
 
 SANDBOX_NAME="${OPENSHELL_SANDBOX_NAME:-openclaw}"
 GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
+OPENSHELL_GATEWAY_PORT="${OPENSHELL_GATEWAY_PORT:-8080}"
+OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-ghcr.io/nvidia/openshell-community/sandboxes/openclaw:latest}"
+GATEWAY_BIND_MODE="${OPENCLAW_GATEWAY_BIND:-loopback}"
+
+case "${GATEWAY_BIND_MODE}" in
+  loopback)
+    SSH_FORWARD_BIND_ADDR="127.0.0.1"
+    SSH_FORWARD_GATEWAY_OPT=()
+    ;;
+  lan)
+    SSH_FORWARD_BIND_ADDR="0.0.0.0"
+    SSH_FORWARD_GATEWAY_OPT=(-g)
+    ;;
+  *)
+    die "Invalid OPENCLAW_GATEWAY_BIND='${GATEWAY_BIND_MODE}'. Expected 'loopback' or 'lan'."
+    ;;
+esac
 
 # Host-side PID files for long-lived processes we start
 SSH_FWD_PID_FILE="/tmp/openclaw-ssh-fwd.pid"
@@ -60,10 +77,10 @@ else
   die "Docker not found. Install Docker and ensure the service is running before starting OpenClaw."
 fi
 
-# Verify openclaw:local Docker image was built by update.sh
-log "Checking openclaw:local image..."
-docker image inspect openclaw:local >/dev/null 2>&1 \
-  || die "Docker image 'openclaw:local' not found. Run scripts/update.sh first."
+# Verify the configured OpenClaw image is available locally.
+log "Checking OpenClaw image..."
+docker image inspect "$OPENCLAW_IMAGE" >/dev/null 2>&1 \
+  || die "Docker image '${OPENCLAW_IMAGE}' not found. Run bash scripts/install.sh or bash scripts/update.sh first."
 
 # Verify repo config reference exists (setup-gateway.sh is the authoritative config;
 # config/openclaw.json is kept as a reference / for install.sh seeding)
@@ -76,7 +93,7 @@ docker image inspect openclaw:local >/dev/null 2>&1 \
 log "Checking OpenShell gateway..."
 if ! openshell gateway info >/dev/null 2>&1; then
   warn "OpenShell gateway is not reachable. Attempting to start it..."
-  if ! openshell gateway start > /tmp/openclaw-gateway-start.log 2>&1; then
+  if ! openshell gateway start --port "${OPENSHELL_GATEWAY_PORT}" > /tmp/openclaw-gateway-start.log 2>&1; then
     tail -30 /tmp/openclaw-gateway-start.log >&2 || true
     die "OpenShell gateway failed to start. See /tmp/openclaw-gateway-start.log"
   fi
@@ -94,7 +111,7 @@ done
 if [[ "${GATEWAY_REACHABLE}" != true ]]; then
   warn "OpenShell gateway still unreachable. Recreating gateway..."
   openshell gateway destroy --name openshell > /tmp/openclaw-gateway-recover.log 2>&1 || true
-  if ! openshell gateway start >> /tmp/openclaw-gateway-recover.log 2>&1; then
+  if ! openshell gateway start --port "${OPENSHELL_GATEWAY_PORT}" >> /tmp/openclaw-gateway-recover.log 2>&1; then
     tail -30 /tmp/openclaw-gateway-recover.log >&2 || true
     die "OpenShell gateway recovery failed. See /tmp/openclaw-gateway-recover.log"
   fi
@@ -156,7 +173,7 @@ if [[ "${SANDBOX_EXISTS}" != true ]]; then
   for attempt in $(seq 1 3); do
     if openshell sandbox create \
       --name "${SANDBOX_NAME}" \
-      --from openclaw \
+      --from "${OPENCLAW_IMAGE}" \
       --no-tty \
       </dev/null \
       -- true \
@@ -176,7 +193,7 @@ if [[ "${SANDBOX_EXISTS}" != true ]]; then
     fi
     if grep -qiE "Gateway .*not reachable|transport error|tls handshake|Connection reset|Connection refused" "${CREATE_LOG}"; then
       warn "Detected gateway connectivity error; restarting OpenShell gateway and retrying..."
-      openshell gateway start > /tmp/openclaw-gateway-start.log 2>&1 || true
+      openshell gateway start --port "${OPENSHELL_GATEWAY_PORT}" > /tmp/openclaw-gateway-start.log 2>&1 || true
     fi
     sleep 2
   done
@@ -351,27 +368,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5d: Sync .agents skills directory into the sandbox
-#
-# The _openclaw-src/.agents folder contains skill definitions used by coding
-# agents. It is tar-piped into ~/.agents inside the sandbox so openclaw can
-# discover and use the skills at runtime.
-# ---------------------------------------------------------------------------
-_AGENTS_SKILLS_DIR="${REPO_ROOT}/_openclaw-src/.agents"
-if [[ -d "${_AGENTS_SKILLS_DIR}" ]]; then
-  log "Syncing .agents skills directory into sandbox ~/.agents..."
-  openshell sandbox exec --name "${SANDBOX_NAME}" -- \
-    bash -lc "mkdir -p ~/.agents"
-  tar -C "${_AGENTS_SKILLS_DIR}" -cf - . \
-    | openshell sandbox exec --name "${SANDBOX_NAME}" -- \
-        bash -lc "tar -C ~/.agents -xf -"
-  log ".agents skills → ~/.agents"
-else
-  warn "_openclaw-src/.agents not found at ${_AGENTS_SKILLS_DIR}; skipping skills sync."
-fi
-
-# ---------------------------------------------------------------------------
-# Step 5e: Sync repo skills/ directory into the sandbox ~/.agents/skills/
+# Step 5d: Sync repo skills/ directory into the sandbox ~/.agents/skills/
 #
 # skills/<name>/SKILL.md files are merged into ~/.agents/skills/ so agents
 # can discover and use them alongside the bundled openclaw skills.
@@ -407,14 +404,15 @@ for _pid_file in "${SSH_FWD_PID_FILE}" "${GW_EXEC_PID_FILE}"; do
   fi
 done
 
-log "Setting up port forward localhost:${GATEWAY_PORT} → sandbox:${GATEWAY_PORT}..."
+log "Setting up port forward ${SSH_FORWARD_BIND_ADDR}:${GATEWAY_PORT} → sandbox:${GATEWAY_PORT}..."
 openshell sandbox ssh-config "${SANDBOX_NAME}" > "${SSH_CONFIG_FILE}"
 
 nohup ssh \
   -F "${SSH_CONFIG_FILE}" \
   -N \
   -o ExitOnForwardFailure=yes \
-  -L "${GATEWAY_PORT}:localhost:${GATEWAY_PORT}" \
+  "${SSH_FORWARD_GATEWAY_OPT[@]}" \
+  -L "${SSH_FORWARD_BIND_ADDR}:${GATEWAY_PORT}:localhost:${GATEWAY_PORT}" \
   "openshell-${SANDBOX_NAME}" \
   > /tmp/openclaw-ssh-fwd.log 2>&1 &
 SSH_FWD_PID=$!
@@ -475,32 +473,67 @@ fi
 # This step is idempotent and safe to re-run on every start.
 # ---------------------------------------------------------------------------
 log "Configuring OpenShell inference routing (Ollama → inference.local)..."
-_INFERENCE_MODEL="${OLLAMA_DEFAULT_MODEL:-qwen3:latest}"
+_INFERENCE_MODEL="${OLLAMA_DEFAULT_MODEL:-}"
+_INFERENCE_MODEL="${_INFERENCE_MODEL#ollama/}"
 _INFERENCE_TIMEOUT="${OLLAMA_INFERENCE_TIMEOUT:-300}"
+_OLLAMA_TAGS_JSON="$(curl -sf "${OLLAMA_BASE_URL:-http://127.0.0.1:11434}/api/tags" 2>/dev/null || echo '{}')"
+_INFERENCE_MODEL="$(python3 - "$_OLLAMA_TAGS_JSON" "$_INFERENCE_MODEL" <<'PYEOF'
+import json, sys
 
-if openshell provider get ollama-local >/dev/null 2>&1; then
-  openshell provider update ollama-local \
-    --type openai \
-    --credential OPENAI_API_KEY=ollama \
-    --config OPENAI_BASE_URL=http://host.openshell.internal:11434/v1 \
-    2>/dev/null || true
-else
-  openshell provider create \
-    --name ollama-local \
-    --type openai \
-    --credential OPENAI_API_KEY=ollama \
-    --config OPENAI_BASE_URL=http://host.openshell.internal:11434/v1 \
-    2>/dev/null || true
-fi
+try:
+    tags = json.loads(sys.argv[1] or "{}")
+except json.JSONDecodeError:
+    tags = {}
 
-if openshell inference set \
-    --provider ollama-local \
-    --model "${_INFERENCE_MODEL}" \
-    --timeout "${_INFERENCE_TIMEOUT}" \
-    2>&1 | grep -v "^$" | tail -3; then
-  log "Inference routing: ollama-local, model=${_INFERENCE_MODEL}, timeout=${_INFERENCE_TIMEOUT}s"
+preferred = (sys.argv[2] or "").strip()
+available = []
+for model in tags.get("models", []):
+    name = (model.get("name") or model.get("model") or "").strip()
+    if name:
+        available.append(name)
+
+if preferred and preferred in available:
+    print(preferred)
+elif available:
+    print(available[0])
+PYEOF
+)"
+
+if [[ -z "${_INFERENCE_MODEL}" ]]; then
+  warn "No Ollama models found at ${OLLAMA_BASE_URL:-http://127.0.0.1:11434}; inference.local will remain unconfigured."
 else
-  warn "Inference routing setup failed — LLM requests via inference.local may not work."
+  if [[ "${OLLAMA_DEFAULT_MODEL:-}" == ollama/* ]] && [[ "${OLLAMA_DEFAULT_MODEL#ollama/}" != "${_INFERENCE_MODEL}" ]]; then
+    warn "OLLAMA_DEFAULT_MODEL (${OLLAMA_DEFAULT_MODEL}) is not available locally; using ollama/${_INFERENCE_MODEL} for inference."
+  fi
+
+  if openshell provider get ollama-local >/dev/null 2>&1; then
+    openshell provider update ollama-local \
+      --credential OPENAI_API_KEY=ollama \
+      --config OPENAI_BASE_URL=http://host.openshell.internal:11434/v1
+  else
+    openshell provider create \
+      --name ollama-local \
+      --type openai \
+      --credential OPENAI_API_KEY=ollama \
+      --config OPENAI_BASE_URL=http://host.openshell.internal:11434/v1
+  fi
+
+  _INFERENCE_OUTPUT=""
+  if _INFERENCE_OUTPUT=$(openshell inference set \
+      --provider ollama-local \
+      --model "${_INFERENCE_MODEL}" \
+      --timeout "${_INFERENCE_TIMEOUT}" 2>&1); then
+    printf '%s\n' "${_INFERENCE_OUTPUT}" | grep -v "^$" | tail -3
+    openshell inference set \
+      --system \
+      --provider ollama-local \
+      --model "${_INFERENCE_MODEL}" \
+      --timeout "${_INFERENCE_TIMEOUT}" >/dev/null
+    log "Inference routing: ollama-local, model=${_INFERENCE_MODEL}, timeout=${_INFERENCE_TIMEOUT}s"
+  else
+    printf '%s\n' "${_INFERENCE_OUTPUT}" >&2
+    warn "Inference routing setup failed — LLM requests via inference.local may not work."
+  fi
 fi
 
 # ---------------------------------------------------------------------------

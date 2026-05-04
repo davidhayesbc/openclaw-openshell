@@ -101,6 +101,7 @@ log "Mode: $MODE"
 _OLLAMA_MODELS_JSON='[]'
 _LMSTUDIO_MODELS_JSON='[]'
 _AGENTS_DEFAULTS_MODELS_JSON='{}'
+_RESOLVED_DEFAULT_MODEL=''
 _HOST_OLLAMA_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
 _HOST_LMSTUDIO_URL="${LMSTUDIO_BASE_URL:-http://127.0.0.1:1234/v1}"
 
@@ -130,8 +131,12 @@ PYEOF
   )
   _OLLAMA_MODELS_JSON=$(echo "$_DISCOVERY" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['models']))")
   _AGENTS_DEFAULTS_MODELS_JSON=$(echo "$_DISCOVERY" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['aliases']))")
+  _RESOLVED_DEFAULT_MODEL=$(python3 -c "import json; import os; models=json.loads('''$_OLLAMA_MODELS_JSON'''); preferred=os.environ.get('OLLAMA_DEFAULT_MODEL','').strip(); preferred = preferred.removeprefix('ollama/') if preferred.startswith('ollama/') else preferred; available=[m.get('id','') for m in models if m.get('id')]; print(f'ollama/{preferred}' if preferred and preferred in available else (f'ollama/{available[0]}' if available else ''))" )
   _COUNT=$(echo "$_OLLAMA_MODELS_JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
   log "Discovered ${_COUNT} Ollama models"
+  if [[ -n "${_RESOLVED_DEFAULT_MODEL}" ]] && [[ "${_RESOLVED_DEFAULT_MODEL}" != "${OLLAMA_DEFAULT_MODEL:-}" ]]; then
+    warn "OLLAMA_DEFAULT_MODEL (${OLLAMA_DEFAULT_MODEL:-unset}) is not available locally; using ${_RESOLVED_DEFAULT_MODEL}"
+  fi
 else
   warn "Could not reach Ollama at ${_HOST_OLLAMA_URL} — keeping empty model list"
 fi
@@ -183,6 +188,30 @@ _INNER=$(cat <<'SETUP_INNER'
 set -euo pipefail
 log()  { echo "[gw-inner] $*"; }
 warn() { echo "[gw-inner] WARN: $*" >&2; }
+run_quiet() {
+  local output status
+  set +e
+  output=$("$@" 2>&1)
+  status=$?
+  set -e
+  if (( status != 0 )); then
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    return "$status"
+  fi
+}
+config_set_quiet() {
+  local path="$1"
+  local value="$2"
+  local output status
+  set +e
+  output=$(openclaw config set --strict-json "$path" "$value" 2>&1)
+  status=$?
+  set -e
+  if (( status != 0 )); then
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    return "$status"
+  fi
+}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ALWAYS: provider routing (sandbox-specific URLs and API secrets)
@@ -198,7 +227,7 @@ _OLLAMA_PROVIDER=$(node -e "process.stdout.write(JSON.stringify({
   apiKey: 'unused',
   models: JSON.parse(process.env.OLLAMA_MODELS_JSON || '[]')
 }))")
-openclaw config set models.providers.ollama "$_OLLAMA_PROVIDER"
+config_set_quiet models.providers.ollama "$_OLLAMA_PROVIDER"
 
 # OpenRouter (cloud fallback — skip if no API key)
 if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
@@ -208,7 +237,7 @@ if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
     apiKey: process.env.OPENROUTER_API_KEY,
     models: []
   }))")
-  openclaw config set models.providers.openai "$_OPENROUTER_PROVIDER"
+  config_set_quiet models.providers.openai "$_OPENROUTER_PROVIDER"
 fi
 
 # LM Studio (optional local provider with GPU acceleration)
@@ -219,14 +248,34 @@ if [[ -n "${LMSTUDIO_BASE_URL:-}" ]]; then
     apiKey: process.env.LM_API_TOKEN || null,
     models: JSON.parse(process.env.LMSTUDIO_MODELS_JSON || '[]')
   }))")
-  openclaw config set models.providers.lmstudio "$_LMSTUDIO_PROVIDER"
+  config_set_quiet models.providers.lmstudio "$_LMSTUDIO_PROVIDER"
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ALWAYS: model aliases (rebuilt from fresh Ollama discovery)
 # ──────────────────────────────────────────────────────────────────────────────
 log "Syncing model aliases..."
-openclaw config set agents.defaults.models "${AGENTS_DEFAULTS_MODELS_JSON}"
+config_set_quiet agents.defaults.models "${AGENTS_DEFAULTS_MODELS_JSON}"
+
+# Optional explicit default model override (for cloud-first setups).
+if [[ -n "${EXPLICIT_DEFAULT_MODEL:-}" ]]; then
+  log "Applying explicit default model: ${EXPLICIT_DEFAULT_MODEL}"
+  config_set_quiet agents.defaults.model.primary \
+    "$(node -e "process.stdout.write(JSON.stringify(process.argv[1]))" "${EXPLICIT_DEFAULT_MODEL}")"
+fi
+
+# Always honor requested gateway bind mode so loopback/lan changes apply on
+# restart without requiring a full reset.
+_GW_BIND="${OPENCLAW_GATEWAY_BIND:-loopback}"
+case "${_GW_BIND}" in
+  loopback|lan) ;;
+  *)
+    warn "Invalid OPENCLAW_GATEWAY_BIND='${_GW_BIND}' (expected loopback|lan); falling back to loopback"
+    _GW_BIND="loopback"
+    ;;
+esac
+_GW_BIND_JSON="\"${_GW_BIND}\""
+config_set_quiet gateway.bind "${_GW_BIND_JSON}"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # FULL MODE: structural settings, agents, channels, model defaults
@@ -235,50 +284,49 @@ if [[ "${SETUP_MODE}" == "full" ]]; then
   log "Applying full structural configuration..."
 
   # Gateway
-  openclaw config set gateway.mode local
-  openclaw config set gateway.bind loopback
-  openclaw config set gateway.controlUi.allowedOrigins \
-    '["http://localhost:18789","http://127.0.0.1:18789"]'
+  config_set_quiet gateway.mode '"local"'
+  _GW_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
+  _GW_ALLOWED_ORIGINS="[\"http://localhost:${_GW_PORT}\",\"http://127.0.0.1:${_GW_PORT}\"]"
+  config_set_quiet gateway.controlUi.allowedOrigins \
+    "${_GW_ALLOWED_ORIGINS}"
 
   # Session
-  openclaw config set session.dmScope per-channel-peer
+  config_set_quiet session.dmScope '"per-channel-peer"'
 
   # Tools
-  openclaw config set tools.profile       messaging
-  openclaw config set tools.deny \
+  config_set_quiet tools.profile '"messaging"'
+  config_set_quiet tools.deny \
     '["group:automation","group:runtime","group:fs","sessions_spawn","sessions_send"]'
-  openclaw config set tools.fs.workspaceOnly  true
-  openclaw config set tools.exec.security     deny
-  openclaw config set tools.exec.ask          always
-  openclaw config set tools.elevated.enabled  false
+  config_set_quiet tools.fs.workspaceOnly  'true'
+  config_set_quiet tools.exec.security     '"deny"'
+  config_set_quiet tools.exec.ask          '"always"'
+  config_set_quiet tools.elevated.enabled  'false'
 
   # Logging
-  openclaw config set logging.redactSensitive tools
-  openclaw config set logging.level           info
+  config_set_quiet logging.redactSensitive '"tools"'
+  config_set_quiet logging.level           '"info"'
 
   # Telegram channel (requires bot token; skipped silently if absent)
   if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
     log "Configuring Telegram channel..."
-    openclaw channels add --channel telegram --token "${TELEGRAM_BOT_TOKEN}" 2>/dev/null \
-      || log "  (channels add returned non-zero — channel may already be configured)"
-    openclaw config set channels.telegram.enabled   true
-    openclaw config set channels.telegram.dmPolicy  pairing
+    config_set_quiet channels.telegram.enabled   'true'
+    config_set_quiet channels.telegram.dmPolicy  '"pairing"'
     if [[ -n "${TELEGRAM_ALLOWED_PEER:-}" ]]; then
-      openclaw config set channels.telegram.allowFrom "[\"${TELEGRAM_ALLOWED_PEER}\"]"
+      config_set_quiet channels.telegram.allowFrom "[\"${TELEGRAM_ALLOWED_PEER}\"]"
     fi
-    openclaw config set channels.telegram.groups '{"*":{"requireMention":true}}'
+    config_set_quiet channels.telegram.groups '{"*":{"requireMention":true}}'
   fi
 
   # Agents
   log "Configuring agents..."
-  openclaw agents add main  --workspace ~/.openclaw/workspace       --non-interactive \
+  run_quiet openclaw agents add main  --workspace ~/.openclaw/workspace       --non-interactive \
     2>/dev/null || log "  Agent 'main' already exists"
-  openclaw agents add coder --workspace ~/.openclaw/workspace-coder --non-interactive \
+  run_quiet openclaw agents add coder --workspace ~/.openclaw/workspace-coder --non-interactive \
     2>/dev/null || log "  Agent 'coder' already exists"
 
   # Bindings: route Telegram DMs from allowed peer → main agent
   if [[ -n "${TELEGRAM_ALLOWED_PEER:-}" ]]; then
-    openclaw config set bindings \
+    config_set_quiet bindings \
       "[{\"agentId\":\"main\",\"match\":{\"channel\":\"telegram\",\"peer\":{\"kind\":\"direct\",\"id\":\"${TELEGRAM_ALLOWED_PEER}\"}}}]"
   fi
 
@@ -294,16 +342,16 @@ if [[ "${SETUP_MODE}" == "full" ]]; then
   
   if [[ -n "$_saved_primary" && "$_saved_primary" != "null" ]]; then
     log "Restoring saved primary model: $_saved_primary"
-    openclaw config set agents.defaults.model.primary "$_saved_primary"
+    config_set_quiet agents.defaults.model.primary "$(node -e "process.stdout.write(JSON.stringify(process.argv[1]))" "$_saved_primary")"
     # Also restore fallbacks if they were saved
     _saved_fallbacks=$(echo "${SAVED_MODEL_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d.get('fallbacks',[])))" 2>/dev/null || true)
     if [[ -n "$_saved_fallbacks" && "$_saved_fallbacks" != "null" ]]; then
-      openclaw config set agents.defaults.model.fallbacks "$_saved_fallbacks"
+      config_set_quiet agents.defaults.model.fallbacks "$_saved_fallbacks"
     fi
   elif [[ -z "$_current" || "$_current" == "null" || "$_current" == "undefined" ]]; then
     log "Setting initial primary model: ${DEFAULT_MODEL}"
-    openclaw config set agents.defaults.model.primary "${DEFAULT_MODEL}"
-    openclaw config set agents.defaults.model.fallbacks \
+    config_set_quiet agents.defaults.model.primary "$(node -e "process.stdout.write(JSON.stringify(process.argv[1]))" "${DEFAULT_MODEL}")"
+    config_set_quiet agents.defaults.model.fallbacks \
       '["openai/openai/gpt-oss-20b:free","ollama/llama3.1:8b"]'
   else
     log "Preserving existing primary model: $_current"
@@ -325,6 +373,8 @@ printf '%s\n' "$_INNER" \
       env \
         SETUP_MODE="${MODE}" \
         SAVED_MODEL_JSON="${_SAVED_MODEL_JSON}" \
+        OPENCLAW_GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND:-loopback}" \
+        OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}" \
         OLLAMA_SANDBOX_URL="${OLLAMA_SANDBOX_URL:-https://inference.local/v1}" \
         OLLAMA_MODELS_JSON="${_OLLAMA_MODELS_JSON}" \
         LMSTUDIO_MODELS_JSON="${_LMSTUDIO_MODELS_JSON}" \
@@ -334,7 +384,8 @@ printf '%s\n' "$_INNER" \
         LM_API_TOKEN="${LM_API_TOKEN:-}" \
         TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
         TELEGRAM_ALLOWED_PEER="${TELEGRAM_ALLOWED_PEER:-}" \
-        DEFAULT_MODEL="${OLLAMA_DEFAULT_MODEL:-ollama/qwen3:latest}" \
+        EXPLICIT_DEFAULT_MODEL="${OPENCLAW_DEFAULT_MODEL:-}" \
+        DEFAULT_MODEL="${_RESOLVED_DEFAULT_MODEL:-${OLLAMA_DEFAULT_MODEL:-ollama/qwen3:latest}}" \
       bash -s
 
 log "Gateway configuration applied."
