@@ -43,33 +43,8 @@
     "level": "info"
   },
 
-  "models": {
-    "providers": {
-      "ollama": {
-        "api": "ollama",
-        "baseUrl": "http://127.0.0.1:11434",
-        "apiKey": "OLLAMA_API_KEY",
-        "models": [
-          {
-            "id": "gemma4:e4b",
-            "name": "gemma4:e4b",
-            "input": ["text"],
-            "reasoning": false,
-            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-            "contextWindow": 128000,
-            "maxTokens": 8192
-          }
-        ]
-      }
-    }
-  },
-
   "agents": {
-    "defaults": {
-      "models": {
-        "ollama/gemma4:e4b": { "alias": "gemma4" }
-      }
-    },
+    "defaults": {},
     // Add entries here for each additional agent you create.
     // Each agent gets its own workspace, session history, and auth profiles.
     // The first entry (or the one with "default": true) is the fallback agent.

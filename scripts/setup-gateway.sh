@@ -21,7 +21,7 @@
 #             a sentinel file so subsequent starts use --update automatically.
 #
 #   --update  (Default on subsequent restarts.)  Re-apply secrets, provider
-#             URLs, and the Ollama models list only.  Does not touch agents,
+#             URLs, and discovered local model lists. Does not touch agents,
 #             bindings, channels, tools policy, or model selection.
 #
 #   --reset   Clear the setup sentinel so the next run (or an explicit --full)
@@ -74,6 +74,7 @@ build_dotenv_env_args() {
 
 SANDBOX_NAME="${OPENSHELL_SANDBOX_NAME:-openclaw}"
 SENTINEL='~/.openclaw/.setup-done'
+
 build_dotenv_env_args .env
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
@@ -123,87 +124,6 @@ fi
 
 log "Mode: $MODE"
 
-# ── Local LLM model discovery (host-side) ──────────────────────────────────────
-# Discovers models from both Ollama and LM Studio providers
-_OLLAMA_MODELS_JSON='[]'
-_LMSTUDIO_MODELS_JSON='[]'
-_AGENTS_DEFAULTS_MODELS_JSON='{}'
-_RESOLVED_DEFAULT_MODEL=''
-_HOST_OLLAMA_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
-_HOST_LMSTUDIO_URL="${LMSTUDIO_BASE_URL:-http://127.0.0.1:1234/v1}"
-
-# ─ Ollama discovery
-log "Enumerating Ollama models from ${_HOST_OLLAMA_URL}..."
-_OLLAMA_TAGS_TMP=$(mktemp)
-if curl -sf --max-time 8 "${_HOST_OLLAMA_URL}/api/tags" > "$_OLLAMA_TAGS_TMP" 2>/dev/null \
-    && [[ -s "$_OLLAMA_TAGS_TMP" ]]; then
-  _DISCOVERY=$(python3 - "$_OLLAMA_TAGS_TMP" <<'PYEOF'
-import json, sys
-with open(sys.argv[1]) as f:
-    tags = json.load(f)
-models, aliases = [], {}
-for m in tags.get('models', []):
-    name = m.get('name') or m.get('model', '')
-    if not name:
-        continue
-    models.append({
-        'id': name, 'name': name, 'input': ['text'], 'reasoning': False,
-        'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0},
-        'contextWindow': 131072, 'maxTokens': 8192,
-    })
-    alias = name.split(':')[0].split('/')[-1]
-    aliases[f'ollama/{name}'] = {'alias': alias}
-print(json.dumps({'models': models, 'aliases': aliases}))
-PYEOF
-  )
-  _OLLAMA_MODELS_JSON=$(echo "$_DISCOVERY" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['models']))")
-  _AGENTS_DEFAULTS_MODELS_JSON=$(echo "$_DISCOVERY" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['aliases']))")
-  _RESOLVED_DEFAULT_MODEL=$(python3 -c "import json; import os; models=json.loads('''$_OLLAMA_MODELS_JSON'''); preferred=os.environ.get('OLLAMA_DEFAULT_MODEL','').strip(); preferred = preferred.removeprefix('ollama/') if preferred.startswith('ollama/') else preferred; available=[m.get('id','') for m in models if m.get('id')]; print(f'ollama/{preferred}' if preferred and preferred in available else (f'ollama/{available[0]}' if available else ''))" )
-  _COUNT=$(echo "$_OLLAMA_MODELS_JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
-  log "Discovered ${_COUNT} Ollama models"
-  if [[ -n "${_RESOLVED_DEFAULT_MODEL}" ]] && [[ "${_RESOLVED_DEFAULT_MODEL}" != "${OLLAMA_DEFAULT_MODEL:-}" ]]; then
-    warn "OLLAMA_DEFAULT_MODEL (${OLLAMA_DEFAULT_MODEL:-unset}) is not available locally; using ${_RESOLVED_DEFAULT_MODEL}"
-  fi
-else
-  warn "Could not reach Ollama at ${_HOST_OLLAMA_URL} — keeping empty model list"
-fi
-rm -f "$_OLLAMA_TAGS_TMP"
-
-# ─ LM Studio discovery
-log "Enumerating LM Studio models from ${_HOST_LMSTUDIO_URL}..."
-_LMSTUDIO_MODELS_TMP=$(mktemp)
-if curl -sf --max-time 8 "${_HOST_LMSTUDIO_URL}/models" > "$_LMSTUDIO_MODELS_TMP" 2>/dev/null \
-    && [[ -s "$_LMSTUDIO_MODELS_TMP" ]]; then
-  _LMSTUDIO_DISCOVERY=$(python3 - "$_LMSTUDIO_MODELS_TMP" <<'PYEOF'
-import json, sys
-with open(sys.argv[1]) as f:
-    data = json.load(f)
-models, aliases = [], {}
-for m in data.get('data', []):
-    model_id = m.get('id', '')
-    if not model_id:
-        continue
-    models.append({
-        'id': model_id, 'name': model_id, 'input': ['text'], 'reasoning': False,
-        'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0},
-        'contextWindow': 131072, 'maxTokens': 8192,
-    })
-    alias = model_id.split('/')[-1].split(':')[0]
-    aliases[f'lmstudio/{model_id}'] = {'alias': alias}
-print(json.dumps({'models': models, 'aliases': aliases}))
-PYEOF
-  )
-  _LMSTUDIO_MODELS_JSON=$(echo "$_LMSTUDIO_DISCOVERY" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['models']))")
-  _LMSTUDIO_ALIASES=$(echo "$_LMSTUDIO_DISCOVERY" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['aliases']))")
-  # Merge LM Studio aliases into agents defaults
-  _AGENTS_DEFAULTS_MODELS_JSON=$(python3 -c "import sys,json; a=json.loads('''$_AGENTS_DEFAULTS_MODELS_JSON'''); b=json.loads('''$_LMSTUDIO_ALIASES'''); a.update(b); print(json.dumps(a))")
-  _COUNT=$(echo "$_LMSTUDIO_MODELS_JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
-  log "Discovered ${_COUNT} LM Studio models"
-else
-  warn "Could not reach LM Studio at ${_HOST_LMSTUDIO_URL} — keeping empty model list"
-fi
-rm -f "$_LMSTUDIO_MODELS_TMP"
-
 # ── Generate inner setup script ──────────────────────────────────────────────
 # This script runs inside the sandbox via `bash -s`.
 # Static config values are embedded at generation time (single-quoted heredoc
@@ -239,50 +159,81 @@ config_set_quiet() {
     return "$status"
   fi
 }
+config_unset_quiet() {
+  local path="$1"
+  openclaw config unset "$path" >/dev/null 2>&1 || true
+}
 
 # ──────────────────────────────────────────────────────────────────────────────
-# ALWAYS: provider routing (sandbox-specific URLs and API secrets)
-# Must set entire provider objects atomically — field-by-field causes validation
-# failures because openclaw config set validates the entire config on each call.
+# ALWAYS: provider routing
 # ──────────────────────────────────────────────────────────────────────────────
 log "Configuring providers..."
 
-# Ollama (local inference via inference.local) — set as complete object
-_OLLAMA_PROVIDER=$(node -e "process.stdout.write(JSON.stringify({
-  api: 'openai-completions',
-  baseUrl: process.env.OLLAMA_SANDBOX_URL,
-  apiKey: 'unused',
-  models: JSON.parse(process.env.OLLAMA_MODELS_JSON || '[]')
-}))")
-config_set_quiet models.providers.ollama "$_OLLAMA_PROVIDER"
+# OpenShell does not expose the host's native Ollama API directly to the
+# sandbox. Route requests through inference.local, but materialize the model
+# list from its OpenAI-compatible /v1/models endpoint so OpenClaw does not try
+# native Ollama discovery against /api/tags, which inference.local rejects.
+if [[ -n "${OLLAMA_API_KEY:-}" ]]; then
+  _OLLAMA_MODELS_JSON='[]'
+  _OLLAMA_ALIASES_JSON='{}'
+  _OLLAMA_MODELS_TMP=$(mktemp)
+  _OLLAMA_MODELS_URL="${OLLAMA_SANDBOX_URL:-https://inference.local/v1}"
+  _OLLAMA_MODELS_URL="${_OLLAMA_MODELS_URL%/}/models"
+  if curl -skf --max-time 8 "${_OLLAMA_MODELS_URL}" > "${_OLLAMA_MODELS_TMP}" 2>/dev/null \
+      && [[ -s "${_OLLAMA_MODELS_TMP}" ]]; then
+    _OLLAMA_DISCOVERY=$(node - "${_OLLAMA_MODELS_TMP}" <<'NODE'
+const fs = require('fs');
+const path = process.argv[2];
+const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+const models = [];
+const aliases = {};
+for (const item of data.data || []) {
+  const id = String(item.id || '').trim();
+  if (!id) continue;
+  models.push({
+    id,
+    name: id,
+    input: ['text'],
+    reasoning: /\b(reasoning|deepseek-r1|qwen3)\b/i.test(id),
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 8192
+  });
+  aliases[`ollama/${id}`] = { alias: id.split('/').pop().split(':')[0] };
+}
+process.stdout.write(JSON.stringify({ models, aliases }));
+NODE
+)
+    _OLLAMA_MODELS_JSON=$(node -e "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).models))" "${_OLLAMA_DISCOVERY}")
+    _OLLAMA_ALIASES_JSON=$(node -e "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).aliases))" "${_OLLAMA_DISCOVERY}")
+    _OLLAMA_MODEL_COUNT=$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).length))" "${_OLLAMA_MODELS_JSON}")
+    log "Discovered ${_OLLAMA_MODEL_COUNT} Ollama models from inference.local"
+  else
+    warn "Could not discover Ollama models from ${_OLLAMA_MODELS_URL}; keeping empty model list"
+  fi
+  rm -f "${_OLLAMA_MODELS_TMP}"
 
-# OpenRouter (cloud fallback — skip if no API key)
-if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
-  _OPENROUTER_PROVIDER=$(node -e "process.stdout.write(JSON.stringify({
+  _OLLAMA_PROVIDER=$(node -e "process.stdout.write(JSON.stringify({
     api: 'openai-completions',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    apiKey: process.env.OPENROUTER_API_KEY,
-    models: []
-  }))")
-  config_set_quiet models.providers.openai "$_OPENROUTER_PROVIDER"
+    baseUrl: process.env.OLLAMA_SANDBOX_URL || 'https://inference.local/v1',
+    apiKey: process.env.OLLAMA_API_KEY,
+    models: JSON.parse(process.argv[1] || '[]')
+  }))" "${_OLLAMA_MODELS_JSON}")
+  config_set_quiet models.providers.ollama "$_OLLAMA_PROVIDER"
+  config_set_quiet agents.defaults.models "${_OLLAMA_ALIASES_JSON}"
 fi
 
-# LM Studio (optional local provider with GPU acceleration)
-if [[ -n "${LMSTUDIO_BASE_URL:-}" ]]; then
+# LM Studio is OpenAI-compatible. Keep the model list empty so OpenClaw can
+# discover from /v1/models instead of this script constructing model entries.
+if [[ -n "${LM_API_TOKEN:-}" ]]; then
   _LMSTUDIO_PROVIDER=$(node -e "process.stdout.write(JSON.stringify({
     api: 'openai-completions',
-    baseUrl: process.env.LMSTUDIO_BASE_URL,
+    baseUrl: process.env.LMSTUDIO_BASE_URL || 'http://host.openshell.internal:1234/v1',
     apiKey: process.env.LM_API_TOKEN || null,
-    models: JSON.parse(process.env.LMSTUDIO_MODELS_JSON || '[]')
+    models: []
   }))")
   config_set_quiet models.providers.lmstudio "$_LMSTUDIO_PROVIDER"
 fi
-
-# ──────────────────────────────────────────────────────────────────────────────
-# ALWAYS: model aliases (rebuilt from fresh Ollama discovery)
-# ──────────────────────────────────────────────────────────────────────────────
-log "Syncing model aliases..."
-config_set_quiet agents.defaults.models "${AGENTS_DEFAULTS_MODELS_JSON}"
 
 # Optional explicit default model override (for cloud-first setups).
 if [[ -n "${EXPLICIT_DEFAULT_MODEL:-}" ]]; then
@@ -342,6 +293,15 @@ if [[ "${SETUP_MODE}" == "full" ]]; then
       config_set_quiet channels.telegram.allowFrom "[\"${TELEGRAM_ALLOWED_PEER}\"]"
     fi
     config_set_quiet channels.telegram.groups '{"*":{"requireMention":true}}'
+  fi
+
+  # Discord channel (requires bot token; skipped silently if absent)
+  if [[ -n "${DISCORD_BOT_TOKEN:-}" ]]; then
+    log "Configuring Discord channel..."
+    config_set_quiet channels.discord.token \
+      '{"source":"env","provider":"default","id":"DISCORD_BOT_TOKEN"}'
+    config_set_quiet channels.discord.enabled 'true'
+    config_set_quiet channels.discord.dmPolicy '"pairing"'
   fi
 
   # Agents
@@ -404,16 +364,13 @@ printf '%s\n' "$_INNER" \
         OPENCLAW_GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND:-loopback}" \
         OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}" \
         OLLAMA_SANDBOX_URL="${OLLAMA_SANDBOX_URL:-https://inference.local/v1}" \
-        OLLAMA_MODELS_JSON="${_OLLAMA_MODELS_JSON}" \
-        LMSTUDIO_MODELS_JSON="${_LMSTUDIO_MODELS_JSON}" \
-        AGENTS_DEFAULTS_MODELS_JSON="${_AGENTS_DEFAULTS_MODELS_JSON}" \
-        OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
-        LMSTUDIO_BASE_URL="${LMSTUDIO_BASE_URL:-http://127.0.0.1:1234/v1}" \
+        LMSTUDIO_BASE_URL="${LMSTUDIO_BASE_URL:-http://host.openshell.internal:1234/v1}" \
         LM_API_TOKEN="${LM_API_TOKEN:-}" \
         TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
         TELEGRAM_ALLOWED_PEER="${TELEGRAM_ALLOWED_PEER:-}" \
+        DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-}" \
         EXPLICIT_DEFAULT_MODEL="${OPENCLAW_DEFAULT_MODEL:-}" \
-        DEFAULT_MODEL="${_RESOLVED_DEFAULT_MODEL:-${OLLAMA_DEFAULT_MODEL:-ollama/qwen3:latest}}" \
+        DEFAULT_MODEL="${OLLAMA_DEFAULT_MODEL:-ollama/qwen3:latest}" \
       bash -s
 
 log "Gateway configuration applied."

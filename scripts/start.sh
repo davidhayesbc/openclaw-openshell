@@ -204,8 +204,10 @@ elif [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
   OPENCLAW_AUTH_CHOICE="openrouter-api-key"
 elif [[ -n "${OLLAMA_API_KEY:-}" ]]; then
   OPENCLAW_AUTH_CHOICE="ollama"
+elif [[ -n "${LM_API_TOKEN:-}" ]]; then
+  OPENCLAW_AUTH_CHOICE="lmstudio"
 else
-  die "No LLM API key found in .env (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_API_KEY required)."
+  die "No LLM API key found in .env (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, OLLAMA_API_KEY, or LM_API_TOKEN required)."
 fi
 
 # ---------------------------------------------------------------------------
@@ -339,9 +341,14 @@ _SAVED_MODEL_JSON=$(openshell sandbox exec --name "${SANDBOX_NAME}" -- \
 # Tokens are passed inline; the sandbox has no access to the host env.
 # ---------------------------------------------------------------------------
 log "Running openclaw onboard (non-interactive)..."
+_ONBOARD_OLLAMA_API_KEY=""
+if [[ "${OPENCLAW_AUTH_CHOICE}" == "ollama" ]]; then
+  _ONBOARD_OLLAMA_API_KEY="${OLLAMA_API_KEY:-}"
+fi
 openshell sandbox exec --name "${SANDBOX_NAME}" -- \
   env \
     "${DOTENV_ENV_ARGS[@]}" \
+    OLLAMA_API_KEY="${_ONBOARD_OLLAMA_API_KEY}" \
     openclaw onboard \
       --non-interactive \
       --accept-risk \
@@ -519,10 +526,9 @@ fi
 # Step 7b: Configure OpenShell inference routing → local Ollama via
 #          inference.local
 #
-# Direct connections from the sandbox to host.openshell.internal are blocked
-# by the proxy's SSRF protection. inference.local is the designated bypass:
-# the gateway proxies requests to the configured provider without SSRF checks.
-# This step is idempotent and safe to re-run on every start.
+# Native host Ollama is not directly reachable from the OpenShell sandbox in
+# this environment. inference.local is the designated OpenShell path for local
+# model traffic.
 # ---------------------------------------------------------------------------
 log "Configuring OpenShell inference routing (Ollama → inference.local)..."
 _INFERENCE_MODEL="${OLLAMA_DEFAULT_MODEL:-}"

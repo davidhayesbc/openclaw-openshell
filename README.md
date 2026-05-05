@@ -101,7 +101,7 @@ bash scripts/audit.sh --deep
 - `tools.fs.workspaceOnly: true` — no host filesystem access
 - `tools.elevated.enabled: false` — no privileged operations
 - `session.dmScope: per-channel-peer` — session isolation
-- `models.providers.ollama` — native Ollama API support for local models (e.g. Gemma 4)
+- Ollama local models routed through OpenShell `inference.local`
 
 ---
 
@@ -129,7 +129,7 @@ openshell policy set openclaw --policy policies/base-policy.yaml --wait
 
 ---
 
-## Ollama + Gemma 4 (Sandbox)
+## Ollama Local Models (Sandbox)
 
 Use this when you want local inference through Ollama while keeping OpenShell policy enforcement.
 
@@ -137,23 +137,25 @@ Use this when you want local inference through Ollama while keeping OpenShell po
 # 1) Enable Ollama provider in .env
 echo 'OLLAMA_API_KEY=ollama-local' >> .env
 
-# 2) Ensure Ollama is reachable at 127.0.0.1:11434 from the sandbox
-# (If running locally, start Ollama on the host and make it reachable to the sandbox runtime)
+# 2) Start Ollama on the host. scripts/start.sh routes the selected model
+# through OpenShell inference.local for sandbox access.
 
-# 3) Pull Gemma 4 in Ollama
-ollama pull gemma4
+# 3) Pull any model in Ollama
+ollama pull qwen3
 
 # 4) Restart OpenClaw sandbox so config/env are reloaded
 bash scripts/stop.sh
 bash scripts/start.sh
 
-# 5) Select Gemma 4 in OpenClaw
-openclaw models set ollama/gemma4
+# 5) Select a discovered model in OpenClaw
+openclaw models list --provider ollama
+openclaw models set ollama/qwen3
 ```
 
 Notes:
-- `config/openclaw.json` already includes an Ollama provider entry and a `gemma4` alias.
-- Use native Ollama URL format only (`http://...:11434`), not `/v1`.
+- The OpenShell sandbox cannot reach the host Ollama loopback directly.
+- `scripts/setup-gateway.sh` discovers models from `https://inference.local/v1/models` inside the sandbox and writes that generated list into the active OpenClaw config.
+- Avoid pointing sandbox config at `127.0.0.1:11434`; that resolves to the sandbox itself, not the Windows host.
 
 ---
 
