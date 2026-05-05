@@ -223,16 +223,65 @@ NODE
   config_set_quiet agents.defaults.models "${_OLLAMA_ALIASES_JSON}"
 fi
 
-# LM Studio is OpenAI-compatible. Keep the model list empty so OpenClaw can
-# discover from /v1/models instead of this script constructing model entries.
-if [[ -n "${LM_API_TOKEN:-}" ]]; then
+# LM Studio is OpenAI-compatible and commonly runs without auth. Configure it
+# when either the endpoint or token is present, and materialize any discovered
+# models because OpenClaw does not auto-list arbitrary OpenAI-compatible
+# providers with an empty model list.
+if [[ -n "${LMSTUDIO_BASE_URL:-}" || -n "${LM_API_TOKEN:-}" ]]; then
+  _LMSTUDIO_MODELS_JSON='[]'
+  _LMSTUDIO_ALIASES_JSON='{}'
+  _LMSTUDIO_MODELS_TMP=$(mktemp)
+  _LMSTUDIO_MODELS_URL="${LMSTUDIO_BASE_URL:-http://host.openshell.internal:1234/v1}"
+  _LMSTUDIO_MODELS_URL="${_LMSTUDIO_MODELS_URL%/}/models"
+  if curl -sf --max-time 8 "${_LMSTUDIO_MODELS_URL}" > "${_LMSTUDIO_MODELS_TMP}" 2>/dev/null \
+      && [[ -s "${_LMSTUDIO_MODELS_TMP}" ]]; then
+    _LMSTUDIO_DISCOVERY=$(node - "${_LMSTUDIO_MODELS_TMP}" <<'NODE'
+const fs = require('fs');
+const path = process.argv[2];
+const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+const models = [];
+const aliases = {};
+for (const item of data.data || []) {
+  const id = String(item.id || '').trim();
+  if (!id) continue;
+  models.push({
+    id,
+    name: id,
+    input: ['text'],
+    reasoning: /\b(reasoning|deepseek-r1|qwen3)\b/i.test(id),
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 8192
+  });
+  aliases[`lmstudio/${id}`] = { alias: id.split('/').pop().split(':')[0] };
+}
+process.stdout.write(JSON.stringify({ models, aliases }));
+NODE
+)
+    _LMSTUDIO_MODELS_JSON=$(node -e "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).models))" "${_LMSTUDIO_DISCOVERY}")
+    _LMSTUDIO_ALIASES_JSON=$(node -e "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).aliases))" "${_LMSTUDIO_DISCOVERY}")
+    _LMSTUDIO_MODEL_COUNT=$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).length))" "${_LMSTUDIO_MODELS_JSON}")
+    log "Discovered ${_LMSTUDIO_MODEL_COUNT} LM Studio models"
+  else
+    warn "Could not discover LM Studio models from ${_LMSTUDIO_MODELS_URL}; keeping empty model list"
+  fi
+  rm -f "${_LMSTUDIO_MODELS_TMP}"
+
   _LMSTUDIO_PROVIDER=$(node -e "process.stdout.write(JSON.stringify({
     api: 'openai-completions',
     baseUrl: process.env.LMSTUDIO_BASE_URL || 'http://host.openshell.internal:1234/v1',
     apiKey: process.env.LM_API_TOKEN || null,
-    models: []
-  }))")
+    models: JSON.parse(process.argv[1] || '[]')
+  }))" "${_LMSTUDIO_MODELS_JSON}")
   config_set_quiet models.providers.lmstudio "$_LMSTUDIO_PROVIDER"
+  if [[ "${_LMSTUDIO_ALIASES_JSON}" != "{}" ]]; then
+    _MERGED_MODEL_ALIASES=$(node -e "
+      const current = JSON.parse(process.argv[1] || '{}');
+      const next = JSON.parse(process.argv[2] || '{}');
+      process.stdout.write(JSON.stringify({ ...current, ...next }));
+    " "$(openclaw config get agents.defaults.models 2>/dev/null || echo '{}')" "${_LMSTUDIO_ALIASES_JSON}")
+    config_set_quiet agents.defaults.models "${_MERGED_MODEL_ALIASES}"
+  fi
 fi
 
 # Optional explicit default model override (for cloud-first setups).
